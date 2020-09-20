@@ -216,7 +216,7 @@ void gen_rust_enums(StringBuilder &sb, std::string name, const std::vector<const
       << variant_name << "(v) }}\n";
   }
   
-  // TryFrom<Object>
+  // TryFrom<Object> and Into<Object>
   if(generate_from_object) {
     sb << "\timpl<'a> TryFrom<Object<'a>> for " << name << (ty_needs_lifetime ? "<'a>" : "") << "{\n";
     sb << "\t\ttype Error = Object<'a>;\n";
@@ -229,6 +229,19 @@ void gen_rust_enums(StringBuilder &sb, std::string name, const std::vector<const
       sb << "\t\t\t\tObject::" << capitalized << "(v) => Result::Ok(Self::" << variant_name << "(v)),\n";
     }
     sb << "\t\t\t\tv @ _ => Result::Err(v),\n";
+    sb << "\t\t\t}\n";
+    sb << "\t\t}\n";
+    sb << "\t}\n";
+    
+    sb << "\timpl<'a> Into<Object<'a>> for " << name << (ty_needs_lifetime ? "<'a>" : "") << "{\n";
+    sb << "\t\tfn into(self) -> Object<'a> {\n";
+    sb << "\t\t\tmatch self {\n";
+    for(auto *cons : vec) {
+      auto capitalized = capitalize_first(cons->name);
+      auto variant_name = remove_prefix(capitalized, name);
+      
+      sb << "\t\t\t\tSelf::" << variant_name << "(v) => Object::" << capitalized << "(v),\n";
+    }
     sb << "\t\t\t}\n";
     sb << "\t\t}\n";
     sb << "\t}\n";
