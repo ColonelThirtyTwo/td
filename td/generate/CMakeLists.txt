@@ -89,6 +89,10 @@ set(TL_GENERATE_JSON_SOURCE
   tl_json_converter.h
 )
 
+set(TL_GENERATE_RUST_SOURCE
+  tl_rust_converter.cpp
+)
+
 if (NOT CMAKE_CROSSCOMPILING)
   find_program(PHP_EXECUTABLE php)
 
@@ -132,6 +136,15 @@ if (NOT CMAKE_CROSSCOMPILING)
     COMMAND generate_json
     COMMENT "Generate JSON tl source files"
     DEPENDS generate_json ${TL_TD_API_TLO}
+  )
+  
+  add_executable(generate_rust ${TL_GENERATE_RUST_SOURCE})
+  target_link_libraries(generate_rust PRIVATE tdtl tdutils)
+  add_custom_target(tl_generate_rust
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMAND generate_rust
+    COMMENT "Generate Rust tl source files"
+    DEPENDS generate_rust ${TL_TD_API_TLO}
   )
 
   if (TD_ENABLE_JNI)

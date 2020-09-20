@@ -909,6 +909,7 @@ if (NOT CMAKE_CROSSCOMPILING)
   endif()
   target_link_libraries(tg_cli PRIVATE memprof tdclient tdcore tdtl)
   add_dependencies(tg_cli tl_generate_json)
+  add_dependencies(tg_cli tl_generate_rust)
 endif()
 
 #Exported libraries
