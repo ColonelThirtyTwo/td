@@ -173,7 +173,7 @@ void gen_rust_structs(StringBuilder &sb, const tl::simple::Schema &schema) {
 }
 
 template<class T>
-void gen_rust_enums(StringBuilder &sb, std::string name, const std::vector<const T*> &vec) {
+void gen_rust_enums(StringBuilder &sb, std::string name, const std::vector<const T*> &vec, bool generate_from_object=false) {
   sb << "\t#[derive(Serialize, Deserialize, Clone, Debug)]\n";
   sb << "\t#[serde(tag=\"@type\")]\n";
   sb << "\tpub enum " << name;
@@ -215,6 +215,25 @@ void gen_rust_enums(StringBuilder &sb, std::string name, const std::vector<const
       << capitalized << (arg_needs_lifetime ? "<'a>" : "") << ") -> Self { Self::"
       << variant_name << "(v) }}\n";
   }
+  
+  // TryFrom<Object>
+  if(generate_from_object) {
+    sb << "\timpl<'a> TryFrom<Object<'a>> for " << name << (ty_needs_lifetime ? "<'a>" : "") << "{\n";
+    sb << "\t\ttype Error = Object<'a>;\n";
+    sb << "\t\tfn try_from(v: Object<'a>) -> Result<Self, Object<'a>> {\n";
+    sb << "\t\t\tmatch v {\n";
+    for(auto *cons : vec) {
+      auto capitalized = capitalize_first(cons->name);
+      auto variant_name = remove_prefix(capitalized, name);
+
+      sb << "\t\t\t\tObject::" << capitalized << "(v) => Result::Ok(Self::" << variant_name << "(v)),\n";
+    }
+    sb << "\t\t\t\tv @ _ => Result::Err(v),\n";
+    sb << "\t\t\t}\n";
+    sb << "\t\t}\n";
+    sb << "\t}\n";
+  }
+  
   sb << "\n";
 }
 
@@ -231,7 +250,7 @@ void gen_rust_enums(StringBuilder &sb, const tl::simple::Schema &schema) {
     }
 
     if (vec.size() > 1) {
-      gen_rust_enums(sb, tl::simple::gen_cpp_name(custom_type->name), vec);
+      gen_rust_enums(sb, tl::simple::gen_cpp_name(custom_type->name), vec, true);
     }
   }
   gen_rust_enums(sb, "Object", vec_for_nullary);
@@ -261,7 +280,7 @@ void gen_rust_file(const tl::simple::Schema &schema, const std::string &file_nam
   sb << "//! Auto-generated JSON messages\n";
   sb << "// Auto-generated, do not edit\n";
   sb << "use serde::{Serialize, Deserialize};\n";
-  sb << "use std::borrow::Cow;\n";
+  sb << "use std::{borrow::Cow, convert::TryFrom};\n";
 
   gen_rust_enums(sb, schema);
   gen_rust_structs(sb, schema);
