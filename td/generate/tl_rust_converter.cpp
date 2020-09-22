@@ -65,9 +65,8 @@ static bool needs_lifetime(const td::tl::simple::Type &type) {
   switch(type.type) {
     case td::tl::simple::Type::Bytes:
     case td::tl::simple::Type::String:
-      return true;
     case td::tl::simple::Type::Vector:
-      return needs_lifetime(*type.vector_value_type);
+      return true;
     case td::tl::simple::Type::Custom:
       return needs_lifetime(type.custom->constructors);
     default:
@@ -78,7 +77,7 @@ static bool needs_lifetime(const td::tl::simple::Type &type) {
 static std::string rust_type(const td::tl::simple::Type &type, const td::tl::simple::CustomType* parent=nullptr) {
   switch(type.type) {
       case td::tl::simple::Type::Bytes:
-        return "Option<&'a [u8]>";
+        return "Cow<'a, [u8]>";
       case td::tl::simple::Type::Bool:
         return "bool";
       case td::tl::simple::Type::Int64:
@@ -89,9 +88,9 @@ static std::string rust_type(const td::tl::simple::Type &type, const td::tl::sim
       case td::tl::simple::Type::Double:
         return "f64";
       case td::tl::simple::Type::String:
-        return "Option<Cow<'a, str>>";
+        return "Cow<'a, str>";
       case td::tl::simple::Type::Vector:
-        return "Vec<" + rust_type(*type.vector_value_type) + ">";
+        return "Cow<'a, [" + rust_type(*type.vector_value_type) + "]>";
       case td::tl::simple::Type::Custom:
         std::string name = type.custom->name;
         if(needs_lifetime(type)) {
@@ -100,7 +99,6 @@ static std::string rust_type(const td::tl::simple::Type &type, const td::tl::sim
         if(parent != nullptr && type.custom == parent) {
           name = "Box<"+name+">";
         }
-        name = "Option<"+name+">";
         return name;
   }
   return "unimplemented";
@@ -113,11 +111,37 @@ static std::string rust_type(const td::tl::simple::Type &type, const td::tl::sim
 }
 
 static std::string rust_field_attr(const td::tl::simple::Type &type) {
-  if(type.type == td::tl::simple::Type::String)
-    return "#[serde(borrow, deserialize_with=\"crate::cow_de::de_opt_cow_str\")]";
+  std::string attrs = "skip_serializing_if=\"Option::is_none\",";
   if(needs_lifetime(type))
-    return "#[serde(borrow)]";
-  return "";
+    attrs += "borrow,";
+  if(type.type == td::tl::simple::Type::String)
+    attrs += "deserialize_with=\"crate::cow_de::de_opt_cow_str\"";
+  if(type.type == td::tl::simple::Type::Bytes)
+    attrs += "serialize_with=\"crate::base64serde::ser_base64\", deserialize_with=\"crate::base64serde::de_base64\"";
+  return "#[serde("+attrs+")]";
+}
+
+static std::string rust_into_owned(const std::string &ident, const td::tl::simple::Type &type, const td::tl::simple::CustomType* parent=nullptr) {
+  if(type.type == td::tl::simple::Type::Vector) {
+    return "Cow::Owned(" + ident + ".into_owned().into_iter().map(|v| " + rust_into_owned("v", *type.vector_value_type) + ").collect::<Vec<_>>())";
+  } else if(needs_lifetime(type)) {
+    if(type.type == td::tl::simple::Type::Custom)
+      if(parent && type.custom == parent)
+        return "Box::new(" + ident + ".into_owned())";
+      else
+        return ident + ".into_owned()";
+    else
+      return "Cow::Owned(" + ident + ".into_owned())";
+  } else {
+    return ident;
+  }
+}
+
+static std::string rust_into_owned(const std::string &ident, const td::tl::simple::Type &type, const td::tl::simple::Type* parent=nullptr) {
+  const td::tl::simple::CustomType *pc_type = nullptr;
+  if(parent && parent->type == td::tl::simple::Type::Custom)
+    pc_type = parent->custom;
+  return rust_into_owned(ident, type, pc_type);
 }
 
 namespace td {
@@ -126,12 +150,13 @@ template <class T>
 void gen_rust_struct(StringBuilder &sb, const T &constructor) {
   auto capitalized = capitalize_first(constructor.name);
   
-  sb << "\t#[derive(Serialize, Deserialize, Clone, Debug)]\n";
+  sb << "\t#[derive(Serialize, Deserialize, Clone, Debug, Default)]\n";
   sb << "\tpub struct " << capitalized;
   if(constructor.args.size() == 0) {
     sb << ";\n\n";
   } else {
-    if(needs_lifetime(constructor.args)) {
+    bool ty_needs_lifetime = needs_lifetime(constructor.args);
+    if(ty_needs_lifetime) {
       sb << "<'a>";
     }
     sb << " {\n";
@@ -148,9 +173,22 @@ void gen_rust_struct(StringBuilder &sb, const T &constructor) {
         sb << "\t\t" << type_attrs << "\n";
       }
       
-      sb << "\t\tpub " << field_name << ": " << rust_type(*arg.type, constructor.type) << ",\n";
+      sb << "\t\tpub " << field_name << ": Option<" << rust_type(*arg.type, constructor.type) << ">,\n";
     }
-    sb << "\t}\n\n";
+    sb << "\t}\n";
+    
+    if(ty_needs_lifetime) {
+      sb << "\timpl<'a> " << capitalized << "<'a> { pub fn into_owned(self) -> " << capitalized << "<'static> { " << capitalized << "::<'static> {\n";
+      for(auto &arg : constructor.args) {
+        std::string ident_name = arg.name != "type" ? arg.name : "typ";
+        
+        sb << "\t\t" << ident_name << ": self." << ident_name << ".map(|v| " <<
+          rust_into_owned("v", *arg.type, constructor.type) << "),\n";
+      }
+      sb << "\t}}}\n";
+    }
+    
+    sb << "\n";
   }
 }
 
@@ -247,6 +285,23 @@ void gen_rust_enums(StringBuilder &sb, std::string name, const std::vector<const
     sb << "\t}\n";
   }
   
+  if(ty_needs_lifetime) {
+    sb << "\timpl<'a> " << name << "<'a> { pub fn into_owned(self) -> " << name << "<'static> { match self {\n";
+    for(auto *cons : vec) {
+      auto capitalized = capitalize_first(cons->name);
+      auto variant_name = remove_prefix(capitalized, name);
+      
+      sb << "\t\tSelf::" << variant_name << "(v) => " << name << "::<'static>::" << variant_name << "(";
+      if(needs_lifetime(cons->args))
+        sb << "v.into_owned()";
+      else
+        sb << "v";
+      
+      sb << "),\n";
+    }
+    sb << "\t}}}\n";
+  }
+  
   sb << "\n";
 }
 
@@ -290,7 +345,6 @@ void gen_rust_file(const tl::simple::Schema &schema, const std::string &file_nam
   std::string buf(2000000, ' ');
   StringBuilder sb(buf);
 
-  sb << "//! Auto-generated JSON messages\n";
   sb << "// Auto-generated, do not edit\n";
   sb << "use serde::{Serialize, Deserialize};\n";
   sb << "use std::{borrow::Cow, convert::TryFrom};\n";
