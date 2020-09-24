@@ -63,12 +63,12 @@ static bool needs_lifetime(const std::vector<const td::tl::simple::Function*> &c
 
 static bool needs_lifetime(const td::tl::simple::Type &type) {
   switch(type.type) {
-    case td::tl::simple::Type::Bytes:
     case td::tl::simple::Type::String:
-    case td::tl::simple::Type::Vector:
       return true;
     case td::tl::simple::Type::Custom:
       return needs_lifetime(type.custom->constructors);
+    case td::tl::simple::Type::Vector:
+      return needs_lifetime(*type.vector_value_type);
     default:
       return false;
   }
@@ -77,7 +77,7 @@ static bool needs_lifetime(const td::tl::simple::Type &type) {
 static std::string rust_type(const td::tl::simple::Type &type, const td::tl::simple::CustomType* parent=nullptr) {
   switch(type.type) {
       case td::tl::simple::Type::Bytes:
-        return "Cow<'a, [u8]>";
+        return "Vec<u8>";
       case td::tl::simple::Type::Bool:
         return "bool";
       case td::tl::simple::Type::Int64:
@@ -90,7 +90,7 @@ static std::string rust_type(const td::tl::simple::Type &type, const td::tl::sim
       case td::tl::simple::Type::String:
         return "Cow<'a, str>";
       case td::tl::simple::Type::Vector:
-        return "Cow<'a, [" + rust_type(*type.vector_value_type) + "]>";
+        return "Vec<" + rust_type(*type.vector_value_type) + ">";
       case td::tl::simple::Type::Custom:
         std::string name = type.custom->name;
         if(needs_lifetime(type)) {
@@ -122,16 +122,18 @@ static std::string rust_field_attr(const td::tl::simple::Type &type) {
 }
 
 static std::string rust_into_owned(const std::string &ident, const td::tl::simple::Type &type, const td::tl::simple::CustomType* parent=nullptr) {
-  if(type.type == td::tl::simple::Type::Vector) {
-    return "Cow::Owned(" + ident + ".into_owned().into_iter().map(|v| " + rust_into_owned("v", *type.vector_value_type) + ").collect::<Vec<_>>())";
-  } else if(needs_lifetime(type)) {
-    if(type.type == td::tl::simple::Type::Custom)
-      if(parent && type.custom == parent)
+ if(needs_lifetime(type)) {
+    if(type.type == td::tl::simple::Type::Vector) {
+      return ident + ".into_iter().map(|v| " + rust_into_owned("v", *type.vector_value_type) + ").collect::<Vec<_>>()";
+    } else if(type.type == td::tl::simple::Type::Custom) {
+      if(parent && type.custom == parent) {
         return "Box::new(" + ident + ".into_owned())";
-      else
+      } else {
         return ident + ".into_owned()";
-    else
+      }
+    } else {
       return "Cow::Owned(" + ident + ".into_owned())";
+    }
   } else {
     return ident;
   }
