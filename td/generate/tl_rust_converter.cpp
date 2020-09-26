@@ -154,44 +154,40 @@ void gen_rust_struct(StringBuilder &sb, const T &constructor) {
   
   sb << "\t#[derive(Serialize, Deserialize, Clone, Debug, Default)]\n";
   sb << "\tpub struct " << capitalized;
-  if(constructor.args.size() == 0) {
-    sb << ";\n\n";
-  } else {
-    bool ty_needs_lifetime = needs_lifetime(constructor.args);
-    if(ty_needs_lifetime) {
-      sb << "<'a>";
-    }
-    sb << " {\n";
-    for (auto &arg : constructor.args) {
-      std::string field_name = tl::simple::gen_cpp_name(arg.name);
-      
-      if(field_name == "type") {
-        sb << "\t#[serde(rename=\"type\")]\n";
-        field_name = "typ";
-      }
-      
-      std::string type_attrs = rust_field_attr(*arg.type);
-      if(type_attrs != "") {
-        sb << "\t\t" << type_attrs << "\n";
-      }
-      
-      sb << "\t\tpub " << field_name << ": Option<" << rust_type(*arg.type, constructor.type) << ">,\n";
-    }
-    sb << "\t}\n";
-    
-    if(ty_needs_lifetime) {
-      sb << "\timpl<'a> " << capitalized << "<'a> { pub fn into_owned(self) -> " << capitalized << "<'static> { " << capitalized << "::<'static> {\n";
-      for(auto &arg : constructor.args) {
-        std::string ident_name = arg.name != "type" ? arg.name : "typ";
-        
-        sb << "\t\t" << ident_name << ": self." << ident_name << ".map(|v| " <<
-          rust_into_owned("v", *arg.type, constructor.type) << "),\n";
-      }
-      sb << "\t}}}\n";
-    }
-    
-    sb << "\n";
+  bool ty_needs_lifetime = needs_lifetime(constructor.args);
+  if(ty_needs_lifetime) {
+    sb << "<'a>";
   }
+  sb << " {\n";
+  for (auto &arg : constructor.args) {
+    std::string field_name = tl::simple::gen_cpp_name(arg.name);
+    
+    if(field_name == "type") {
+      sb << "\t#[serde(rename=\"type\")]\n";
+      field_name = "typ";
+    }
+    
+    std::string type_attrs = rust_field_attr(*arg.type);
+    if(type_attrs != "") {
+      sb << "\t\t" << type_attrs << "\n";
+    }
+    
+    sb << "\t\tpub " << field_name << ": Option<" << rust_type(*arg.type, constructor.type) << ">,\n";
+  }
+  sb << "\t}\n";
+  
+  if(ty_needs_lifetime) {
+    sb << "\timpl<'a> " << capitalized << "<'a> { pub fn into_owned(self) -> " << capitalized << "<'static> { " << capitalized << "::<'static> {\n";
+    for(auto &arg : constructor.args) {
+      std::string ident_name = arg.name != "type" ? arg.name : "typ";
+      
+      sb << "\t\t" << ident_name << ": self." << ident_name << ".map(|v| " <<
+        rust_into_owned("v", *arg.type, constructor.type) << "),\n";
+    }
+    sb << "\t}}}\n";
+  }
+  
+  sb << "\n";
 }
 
 void gen_rust_structs(StringBuilder &sb, const tl::simple::Schema &schema) {
