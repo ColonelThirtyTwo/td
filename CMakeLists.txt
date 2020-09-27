@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0.2 FATAL_ERROR)
 
-project(TDLib VERSION 1.6.0 LANGUAGES CXX C)
+project(TDLib VERSION 1.6.8 LANGUAGES CXX C)
 
 if (NOT DEFINED CMAKE_INSTALL_LIBDIR)
   set(CMAKE_INSTALL_LIBDIR "lib")
@@ -189,7 +189,7 @@ elseif (INTEL)
 endif()
 
 if (WIN32)
-  add_definitions(-DNTDDI_VERSION=0x06020000 -DWINVER=0x0602 -D_WIN32_WINNT=0x0602 -DNOMINMAX -DUNICODE -D_UNICODE)
+  add_definitions(-DNTDDI_VERSION=0x06020000 -DWINVER=0x0602 -D_WIN32_WINNT=0x0602 -DPSAPI_VERSION=1 -DNOMINMAX -DUNICODE -D_UNICODE -DWIN32_LEAN_AND_MEAN)
 endif()
 if (CYGWIN)
   add_definitions(-D_DEFAULT_SOURCE=1 -DFD_SETSIZE=4096)
@@ -220,6 +220,7 @@ if (NOT MSVC)
   add_cxx_compiler_flag("-Wno-sign-conversion")
   add_cxx_compiler_flag("-Wc++14-compat-pedantic")
   add_cxx_compiler_flag("-Wdeprecated")
+  add_cxx_compiler_flag("-Wno-unused-command-line-argument")
   add_cxx_compiler_flag("-Qunused-arguments")
   add_cxx_compiler_flag("-Wodr")
   add_cxx_compiler_flag("-flto-odr-type-merging")
@@ -266,9 +267,9 @@ if (NOT CMAKE_CROSSCOMPILING)
   if (TD_ENABLE_DOTNET)
     add_custom_target(remove_cpp_documentation
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-      COMMAND remove_documentation ${TL_TD_AUTO} td/telegram/Client.h td/telegram/Log.h td/tl/TlObject.h
+      COMMAND remove_documentation ${TL_TD_API_AUTO_SOURCE} td/telegram/Client.h td/telegram/Log.h td/tl/TlObject.h
       COMMENT "Remove C++ documentation from sources"
-      DEPENDS remove_documentation tl_generate_common generate_dotnet_api ${TL_TD_AUTO} td/telegram/Client.h td/telegram/Log.h td/tl/TlObject.h
+      DEPENDS remove_documentation tl_generate_common generate_dotnet_api ${TL_TD_API_AUTO_SOURCE} td/telegram/Client.h td/telegram/Log.h td/tl/TlObject.h
     )
 
     add_dependencies(prepare_cross_compiling generate_dotnet_api remove_cpp_documentation)
@@ -276,7 +277,7 @@ if (NOT CMAKE_CROSSCOMPILING)
 endif()
 
 if (NOT OPENSSL_FOUND)
-  message(WARNING "Not found OpenSSL: skip TDLib, tdactor, tdnet, tddb")
+  message(WARNING "Can't find OpenSSL: stop TDLib building")
   return()
 endif()
 
@@ -284,7 +285,12 @@ if (NOT ZLIB_FOUND)
   find_package(ZLIB)
 endif()
 if (NOT ZLIB_FOUND)
-  message(WARNING "Not found zlib: skip TDLib, tdactor, tdnet, tddb")
+  message(WARNING "Can't find zlib: stop TDLib building")
+  return()
+endif()
+
+if (NOT TDUTILS_MIME_TYPE)
+  message(WARNING "Option TDUTILS_MIME_TYPE must not be disabled: stop TDLib building")
   return()
 endif()
 
@@ -305,52 +311,57 @@ endif()
 
 get_directory_property(HAS_PARENT PARENT_DIRECTORY)
 if (HAS_PARENT)
-  set(TL_TD_API_TLO ${TL_TD_API_TLO} PARENT_SCOPE)
-  set(TL_TD_JSON_AUTO ${TL_TD_JSON_AUTO} PARENT_SCOPE)
-  set(TD_TEST_SOURCE ${TD_TEST_SOURCE} PARENT_SCOPE)
+  set(TL_TD_API_TLO ${TL_TD_API_TLO} PARENT_SCOPE) # was used in standalone binding generators
+  set(TL_TD_JSON_AUTO ${TL_TD_JSON_AUTO_SOURCE} PARENT_SCOPE) # used in tdbot
+  set(TD_TEST_SOURCE ${TD_TEST_SOURCE} PARENT_SCOPE) # used to build tests
 endif()
 
 
 #SOURCE SETS
 
-set_source_files_properties(${TL_TD_AUTO} PROPERTIES GENERATED TRUE)
+set_source_files_properties(${TL_TD_API_AUTO_SOURCE} PROPERTIES GENERATED TRUE)
 if (TD_ENABLE_JNI OR ANDROID)
-  set(TL_JNI_OBJECT
+  set(TL_JNI_OBJECT_SOURCE
     td/tl/tl_jni_object.cpp
     td/tl/tl_jni_object.h
   )
 else()
-  set(TL_JNI_OBJECT)
+  set(TL_JNI_OBJECT_SOURCE)
 endif()
 
+set(TL_TD_API_SOURCE
+  ${TL_TD_API_AUTO_SOURCE}
+  ${TL_JNI_OBJECT_SOURCE}
+  td/tl/TlObject.h
+)
+
+set_source_files_properties(${TL_TD_AUTO_SOURCE} PROPERTIES GENERATED TRUE)
 set(TL_TD_SCHEME_SOURCE
-  ${TL_TD_AUTO}
-  ${TL_JNI_OBJECT}
+  ${TL_TD_AUTO_SOURCE}
   td/tl/TlObject.h
   td/tl/tl_object_parse.h
   td/tl/tl_object_store.h
 )
 
-set_source_files_properties(${TL_TD_JSON_AUTO} PROPERTIES GENERATED TRUE)
-set(TL_TD_JSON
-  ${TL_TD_JSON_AUTO}
+set_source_files_properties(${TL_TD_JSON_AUTO_SOURCE} PROPERTIES GENERATED TRUE)
+set(TL_TD_JSON_SOURCE
+  ${TL_TD_JSON_AUTO_SOURCE}
   td/tl/tl_json.h
 )
 
-set_source_files_properties(${TL_C_AUTO} PROPERTIES GENERATED TRUE)
+set_source_files_properties(${TL_C_AUTO_SOURCE} PROPERTIES GENERATED TRUE)
 set(TL_C_SCHEME_SOURCE
-  ${TL_C_AUTO}
+  ${TL_C_AUTO_SOURCE}
 )
 
-set_source_files_properties(${TL_DOTNET_AUTO} PROPERTIES GENERATED TRUE)
+set_source_files_properties(${TL_DOTNET_AUTO_SOURCE} PROPERTIES GENERATED TRUE)
 set(TL_DOTNET_SCHEME_SOURCE
-  ${TL_DOTNET_AUTO}
+  ${TL_DOTNET_AUTO_SOURCE}
   td/tl/tl_dotnet_object.h
 )
 
 set(TDLIB_SOURCE
   td/mtproto/AuthData.cpp
-  td/mtproto/crypto.cpp
   td/mtproto/DhHandshake.cpp
   td/mtproto/Handshake.cpp
   td/mtproto/HandshakeActor.cpp
@@ -361,6 +372,7 @@ set(TDLIB_SOURCE
   td/mtproto/PingConnection.cpp
   td/mtproto/ProxySecret.cpp
   td/mtproto/RawConnection.cpp
+  td/mtproto/RSA.cpp
   td/mtproto/SessionConnection.cpp
   td/mtproto/TcpTransport.cpp
   td/mtproto/TlsInit.cpp
@@ -389,9 +401,11 @@ set(TDLIB_SOURCE
   td/telegram/DhCache.cpp
   td/telegram/DialogAdministrator.cpp
   td/telegram/DialogDb.cpp
+  td/telegram/DialogFilter.cpp
   td/telegram/DialogId.cpp
   td/telegram/DialogLocation.cpp
   td/telegram/DialogParticipant.cpp
+  td/telegram/DialogSource.cpp
   td/telegram/Document.cpp
   td/telegram/DocumentsManager.cpp
   td/telegram/DraftMessage.cpp
@@ -411,6 +425,7 @@ set(TDLIB_SOURCE
   td/telegram/files/FileManager.cpp
   td/telegram/files/FileStats.cpp
   td/telegram/files/FileStatsWorker.cpp
+  td/telegram/files/FileType.cpp
   td/telegram/files/FileUploader.cpp
   td/telegram/files/PartsManager.cpp
   td/telegram/files/ResourceManager.cpp
@@ -418,6 +433,7 @@ set(TDLIB_SOURCE
   td/telegram/Global.cpp
   td/telegram/HashtagHints.cpp
   td/telegram/InlineQueriesManager.cpp
+  td/telegram/InputDialogId.cpp
   td/telegram/InputMessageText.cpp
   td/telegram/JsonValue.cpp
   td/telegram/LanguagePackManager.cpp
@@ -437,10 +453,10 @@ set(TDLIB_SOURCE
   td/telegram/net/MtprotoHeader.cpp
   td/telegram/net/NetActor.cpp
   td/telegram/net/NetQuery.cpp
-  td/telegram/net/NetQueryCounter.cpp
   td/telegram/net/NetQueryCreator.cpp
   td/telegram/net/NetQueryDelayer.cpp
   td/telegram/net/NetQueryDispatcher.cpp
+  td/telegram/net/NetQueryStats.cpp
   td/telegram/net/NetStatsManager.cpp
   td/telegram/net/Proxy.cpp
   td/telegram/net/PublicRsaKeyShared.cpp
@@ -469,9 +485,11 @@ set(TDLIB_SOURCE
   td/telegram/SecureValue.cpp
   td/telegram/SendCodeHelper.cpp
   td/telegram/SequenceDispatcher.cpp
+  td/telegram/SpecialStickerSetType.cpp
   td/telegram/StateManager.cpp
   td/telegram/StickersManager.cpp
   td/telegram/StorageManager.cpp
+  td/telegram/SuggestedAction.cpp
   td/telegram/Td.cpp
   td/telegram/TdDb.cpp
   td/telegram/TermsOfService.cpp
@@ -486,7 +504,6 @@ set(TDLIB_SOURCE
 
   td/mtproto/AuthData.h
   td/mtproto/AuthKey.h
-  td/mtproto/crypto.h
   td/mtproto/CryptoStorer.h
   td/mtproto/DhHandshake.h
   td/mtproto/Handshake.h
@@ -503,6 +520,7 @@ set(TDLIB_SOURCE
   td/mtproto/ProxySecret.h
   td/mtproto/Query.h
   td/mtproto/RawConnection.h
+  td/mtproto/RSA.h
   td/mtproto/SessionConnection.h
   td/mtproto/TcpTransport.h
   td/mtproto/TlsInit.h
@@ -539,9 +557,13 @@ set(TDLIB_SOURCE
   td/telegram/DialogAdministrator.h
   td/telegram/DialogDate.h
   td/telegram/DialogDb.h
+  td/telegram/DialogFilter.h
+  td/telegram/DialogFilterId.h
   td/telegram/DialogId.h
+  td/telegram/DialogListId.h
   td/telegram/DialogLocation.h
   td/telegram/DialogParticipant.h
+  td/telegram/DialogSource.h
   td/telegram/Document.h
   td/telegram/DocumentsManager.h
   td/telegram/DraftMessage.h
@@ -578,6 +600,7 @@ set(TDLIB_SOURCE
   td/telegram/Global.h
   td/telegram/HashtagHints.h
   td/telegram/InlineQueriesManager.h
+  td/telegram/InputDialogId.h
   td/telegram/InputMessageText.h
   td/telegram/JsonValue.h
   td/telegram/LanguagePackManager.h
@@ -588,6 +611,7 @@ set(TDLIB_SOURCE
   td/telegram/Logging.h
   td/telegram/MessageContent.h
   td/telegram/MessageContentType.h
+  td/telegram/MessageCopyOptions.h
   td/telegram/MessageEntity.h
   td/telegram/MessageId.h
   td/telegram/MessagesDb.h
@@ -606,6 +630,7 @@ set(TDLIB_SOURCE
   td/telegram/net/NetQueryCreator.h
   td/telegram/net/NetQueryDelayer.h
   td/telegram/net/NetQueryDispatcher.h
+  td/telegram/net/NetQueryStats.h
   td/telegram/net/NetStatsManager.h
   td/telegram/net/NetType.h
   td/telegram/net/Proxy.h
@@ -650,10 +675,12 @@ set(TDLIB_SOURCE
   td/telegram/SequenceDispatcher.h
   td/telegram/ServerMessageId.h
   td/telegram/SetWithPosition.h
+  td/telegram/SpecialStickerSetType.h
   td/telegram/StateManager.h
   td/telegram/StickerSetId.h
   td/telegram/StickersManager.h
   td/telegram/StorageManager.h
+  td/telegram/SuggestedAction.h
   td/telegram/Td.h
   td/telegram/TdCallback.h
   td/telegram/TdDb.h
@@ -677,6 +704,7 @@ set(TDLIB_SOURCE
   td/telegram/AudiosManager.hpp
   td/telegram/AuthManager.hpp
   td/telegram/BackgroundType.hpp
+  td/telegram/DialogFilter.hpp
   td/telegram/Document.hpp
   td/telegram/DocumentsManager.hpp
   td/telegram/DraftMessage.hpp
@@ -715,7 +743,7 @@ set(MEMPROF_SOURCE
 
 file(MAKE_DIRECTORY auto)
 
-if (WIN32)
+if (CMAKE_HOST_WIN32)
   set(GIT_COMMIT_CMD powershell -ExecutionPolicy ByPass ./gen_git_commit_h.ps1)
 else()
   set(GIT_COMMIT_CMD ./gen_git_commit_h.sh)
@@ -745,19 +773,34 @@ if (MEMPROF)
 endif()
 
 
-# tdcore - mostly internal TDLib interface. One should use tdactor for interactions with it.
-add_library(tdcore STATIC ${TDLIB_SOURCE})
-target_include_directories(tdcore PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
-target_include_directories(tdcore SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
-target_link_libraries(tdcore PUBLIC tdactor tdutils tdnet tddb PRIVATE ${OPENSSL_CRYPTO_LIBRARY} ${CMAKE_DL_LIBS} ${ZLIB_LIBRARIES})
+add_library(tdapi STATIC ${TL_TD_API_SOURCE})
+target_include_directories(tdapi PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> INTERFACE $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
+target_link_libraries(tdapi PRIVATE tdutils)
 
 if (TD_ENABLE_JNI AND NOT ANDROID) # jni is available by default on Android
   if (NOT JNI_FOUND)
     find_package(JNI REQUIRED)
   endif()
   message(STATUS "Found JNI: ${JNI_INCLUDE_DIRS} ${JNI_LIBRARIES}")
-  target_include_directories(tdcore PUBLIC ${JAVA_INCLUDE_PATH} ${JAVA_INCLUDE_PATH2})
-  target_link_libraries(tdcore PUBLIC ${JAVA_JVM_LIBRARY})
+  target_include_directories(tdapi PUBLIC ${JAVA_INCLUDE_PATH} ${JAVA_INCLUDE_PATH2})
+  target_link_libraries(tdapi PUBLIC ${JAVA_JVM_LIBRARY})
+endif()
+
+if (NOT CMAKE_CROSSCOMPILING)
+  add_dependencies(tdapi tl_generate_common)
+endif()
+
+# tdcore - mostly internal TDLib interface. One should use tdactor for interactions with it.
+add_library(tdcore STATIC ${TDLIB_SOURCE})
+target_include_directories(tdcore PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
+target_include_directories(tdcore SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
+target_link_libraries(tdcore PUBLIC tdapi tdactor tdutils tdnet tddb PRIVATE ${OPENSSL_CRYPTO_LIBRARY} ${CMAKE_DL_LIBS} ${ZLIB_LIBRARIES})
+if (WIN32)
+  if (MINGW)
+    target_link_libraries(tdcore PRIVATE ws2_32 mswsock)
+  else()
+    target_link_libraries(tdcore PRIVATE ws2_32 Mswsock)
+  endif()
 endif()
 
 if (NOT CMAKE_CROSSCOMPILING)
@@ -773,14 +816,8 @@ endif()
 add_library(tdclient td/telegram/Client.cpp td/telegram/Client.h td/telegram/Log.cpp td/telegram/Log.h)
 target_include_directories(tdclient PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-  $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>
 )
-target_link_libraries(tdclient PRIVATE tdcore)
-
-if (TD_ENABLE_JNI AND NOT ANDROID) # jni is available by default on Android
-  target_include_directories(tdclient PUBLIC ${JAVA_INCLUDE_PATH} ${JAVA_INCLUDE_PATH2})
-  target_link_libraries(tdclient PUBLIC ${JAVA_JVM_LIBRARY})
-endif()
+target_link_libraries(tdclient PUBLIC tdapi PRIVATE tdcore)
 
 if (TD_ENABLE_DOTNET)
   add_library(tddotnet SHARED
@@ -818,7 +855,7 @@ if (NOT CMAKE_CROSSCOMPILING)
   add_dependencies(tdc tl_generate_c)
 endif()
 
-add_library(tdjson_private STATIC ${TL_TD_JSON} td/telegram/ClientJson.cpp td/telegram/ClientJson.h)
+add_library(tdjson_private STATIC ${TL_TD_JSON_SOURCE} td/telegram/ClientJson.cpp td/telegram/ClientJson.h)
 target_include_directories(tdjson_private PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
@@ -861,6 +898,7 @@ if (WIN32 OR CYGWIN)
   endif()
 endif()
 if (BIGOBJ)
+  target_compile_options(tdapi PUBLIC ${BIGOBJ})
   target_compile_options(tdc PUBLIC ${BIGOBJ})
   target_compile_options(tdcore PUBLIC ${BIGOBJ})
   target_compile_options(tdclient PUBLIC ${BIGOBJ})
@@ -880,7 +918,7 @@ endif()
 
 #EXECUTABLES
 if (NOT CMAKE_CROSSCOMPILING)
-  add_executable(tg_cli td/telegram/cli.cpp ${TL_TD_JSON})
+  add_executable(tg_cli td/telegram/cli.cpp ${TL_TD_JSON_SOURCE})
 
   if (NOT READLINE_FOUND)
     find_package(Readline)
@@ -907,7 +945,7 @@ if (NOT CMAKE_CROSSCOMPILING)
       target_compile_definitions(tg_cli PRIVATE -DUSE_READLINE=1)
     endif()
   endif()
-  target_link_libraries(tg_cli PRIVATE memprof tdclient tdcore tdtl)
+  target_link_libraries(tg_cli PRIVATE memprof tdclient tdcore)
   add_dependencies(tg_cli tl_generate_json)
   add_dependencies(tg_cli tl_generate_rust)
 endif()
@@ -926,7 +964,7 @@ add_library(Td::TdStatic ALIAS TdStatic)
 add_library(Td::TdJson ALIAS TdJson)
 add_library(Td::TdJsonStatic ALIAS TdJsonStatic)
 
-install(TARGETS tdjson TdJson tdjson_static TdJsonStatic tdjson_private tdclient tdcore TdStatic EXPORT TdTargets
+install(TARGETS tdjson TdJson tdjson_static TdJsonStatic tdjson_private tdclient tdcore tdapi TdStatic EXPORT TdTargets
   LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
@@ -939,8 +977,11 @@ install(EXPORT TdTargets
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Td"
 )
 
+# Install tdjson/tdjson_static:
 install(FILES ${TD_JSON_HEADERS} "${CMAKE_CURRENT_BINARY_DIR}/td/telegram/tdjson_export.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/td/telegram")
+# Install tdclient:
 install(FILES td/telegram/Client.h td/telegram/Log.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/td/telegram")
+# Install tdapi:
 install(FILES td/tl/TlObject.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/td/tl")
 install(FILES "${TL_TD_AUTO_INCLUDE_DIR}/td/telegram/td_api.h" "${TL_TD_AUTO_INCLUDE_DIR}/td/telegram/td_api.hpp" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/td/telegram")
 if (TD_ENABLE_JNI)

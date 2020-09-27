@@ -11,6 +11,7 @@
 #include "td/utils/Slice.h"
 #include "td/utils/StringBuilder.h"
 
+#include <set>
 #include <tuple>
 #include <utility>
 
@@ -192,7 +193,7 @@ inline StringBuilder &operator<<(StringBuilder &logger, Size t) {
     uint64 value;
   };
 
-  static constexpr NamedValue sizes[] = {{"B", 1}, {"kB", 1 << 10}, {"MB", 1 << 20}, {"GB", 1 << 30}};
+  static constexpr NamedValue sizes[] = {{"B", 1}, {"KB", 1 << 10}, {"MB", 1 << 20}, {"GB", 1 << 30}};
   static constexpr size_t sizes_n = sizeof(sizes) / sizeof(NamedValue);
 
   size_t i = 0;
@@ -332,6 +333,10 @@ StringBuilder &operator<<(StringBuilder &sb, const std::pair<A, B> &p) {
 
 template <class T>
 StringBuilder &operator<<(StringBuilder &stream, const vector<T> &vec) {
+  return stream << format::as_array(vec);
+}
+template <class T>
+StringBuilder &operator<<(StringBuilder &stream, const std::set<T> &vec) {
   return stream << format::as_array(vec);
 }
 

@@ -39,9 +39,9 @@ function split_file($file, $chunks, $undo) {
     $cmake_new_files = $new_files;
     if ($is_generated) {
         foreach ($cmake_new_files as &$file_ref) {
-            $file_ref = str_replace('td/generate', '${CMAKE_CURRENT_SOURCE_DIR}', $file_ref);
+            $file_ref = str_replace('td/generate/auto/td', '${TD_AUTO_INCLUDE_DIR}', $file_ref);
         }
-        $cmake_cpp_name = str_replace('td/generate', '${CMAKE_CURRENT_SOURCE_DIR}', $cmake_cpp_name);
+        $cmake_cpp_name = str_replace('td/generate/auto/td', '${TD_AUTO_INCLUDE_DIR}', $cmake_cpp_name);
     }
 
     if ($undo) {
@@ -274,6 +274,7 @@ function split_file($file, $chunks, $undo) {
                 'inline_queries_manager[_(-][^.]|InlineQueriesManager' => 'InlineQueriesManager',
                 'language_pack_manager[_(-][^.]|LanguagePackManager' => 'LanguagePackManager',
                 'get_erase_logevent_promise|parse_time|store_time' => 'logevent/LogEventHelper',
+                'MessageCopyOptions' => 'MessageCopyOptions',
                 'messages_manager[_(-][^.]|MessagesManager' => 'MessagesManager',
                 'notification_manager[_(-][^.]|NotificationManager|notifications[)]' => 'NotificationManager',
                 'PublicDialogType|get_public_dialog_type' => 'PublicDialogType',
@@ -281,7 +282,7 @@ function split_file($file, $chunks, $undo) {
                 'secret_chats_manager[_(-][^.]|SecretChatsManager' => 'SecretChatsManager',
                 'stickers_manager[_(-][^.]|StickersManager' => 'StickersManager',
                 '[>](td_db[(][)]|get_td_db_impl[(])|TdDb[^A-Za-z]' => 'TdDb',
-                'TopDialogCategory|top_dialog_category_from_td_api' => 'TopDialogCategory',
+                'TopDialogCategory|get_top_dialog_category' => 'TopDialogCategory',
                 'top_dialog_manager[_(-][^.]|TopDialogManager' => 'TopDialogManager',
                 'updates_manager[_(-][^.]|UpdatesManager|get_difference[)]' => 'UpdatesManager',
                 'WebPageId(Hash)?' => 'WebPageId',

@@ -63,6 +63,7 @@ select.large { font-size: large; }
         <option>Ubuntu 14</option>
         <option>Ubuntu 16</option>
         <option>Ubuntu 18</option>
+        <option>Ubuntu 20</option>
         <option>Other</option>
       </select>
       <p></p>
@@ -317,11 +318,12 @@ function onOsChanged() {
 
   if (target === 'WebAssembly') {
     text = 'TDLib is available in a prebuilt form as an <a href="https://www.npmjs.com/">NPM</a> package <a href="https://www.npmjs.com/package/tdweb">tdweb</a>.<br>' +
-           'If you want to build it manually, take a look at our <a href="https://github.com/tdlib/td/tree/master/example/web">example</a>';
+           'If you want to build it manually, take a look at our <a href="https://github.com/tdlib/td/tree/master/example/web">example</a>.';
     target = '';
   }
   if (target === 'Android') {
-    text = 'TDLib for Android is available in a prebuilt form and can be downloaded from <a href="https://core.telegram.org/tdlib/tdlib.zip">there</a>.';
+    text = 'TDLib for Android is available in a prebuilt form and can be downloaded from <a href="https://core.telegram.org/tdlib/tdlib.zip">there</a>.<br>' +
+           'See <a href="https://github.com/tdlib/td/issues/77#issuecomment-640719893">build instructions</a> if you want to build the latest TDLib version or want to build TDLib with different interface.';
     target = '';
   }
   if (target === 'iOS') {
@@ -411,7 +413,7 @@ function onOptionsChanged() {
   var use_vcpkg = os_windows;
 
   var use_lto = false;
-  if (!use_msvc && language !== 'Java' && language !== 'Kotlin' && (os_mac || (os_linux && (linux_distro === 'Ubuntu 18' || linux_distro === 'Other')))) {
+  if (!use_msvc && language !== 'Java' && language !== 'Kotlin' && (os_mac || (os_linux && (linux_distro === 'Ubuntu 18' || linux_distro === 'Ubuntu 20' || linux_distro === 'Other')))) {
     document.getElementById('buildLtoDiv').style.display = 'block';
     use_lto = document.getElementById('buildLtoCheckbox').checked;
   } else {
@@ -515,7 +517,8 @@ function onOptionsChanged() {
     pre_text.push('Note that following calls to <code>pkg</code> needs to be run as <code>root</code>.');
   }
   if (os_openbsd) {
-    pre_text.push('Note that following instruction is for OpenBSD 6.4 and default KSH shell.');
+    pre_text.push('Note that following instruction is for OpenBSD 6.7 and default KSH shell.');
+    pre_text.push('Note that building requires a lot of memory, so you may need to increase allowed per-process memory usage in /etc/login.conf or build from root.');
   }
   if (os_netbsd) {
     pre_text.push('Note that following instruction is for NetBSD 8.0 and default SH shell.');
@@ -558,6 +561,19 @@ function onOptionsChanged() {
     install_dir = '../example/java/td';
   }
 
+  function getClangVersionSuffix() {
+    switch (linux_distro) {
+      case 'Ubuntu 14':
+        return '-3.9';
+      case 'Ubuntu 18':
+        return '-6.0';
+      case 'Ubuntu 20':
+        return '-10';
+      default:
+        return ''; // use default version
+    }
+  }
+
   var commands = [];
 
   var php = "php";
@@ -585,6 +601,7 @@ function onOptionsChanged() {
       case 'Ubuntu 14':
       case 'Ubuntu 16':
       case 'Ubuntu 18':
+      case 'Ubuntu 20':
         if (linux_distro.includes('Debian') && !use_root) {
           commands.push('su -');
         }
@@ -608,18 +625,9 @@ function onOptionsChanged() {
           packages += ' default-jdk';
         }
         if (use_clang) {
-          if (linux_distro === 'Ubuntu 18') {
-            packages += ' clang-6.0 libc++-dev libc++abi-dev';
-          } else {
-            if (linux_distro === 'Ubuntu 14') {
-              packages += ' clang-3.9';
-            } else {
-              packages += ' clang';
-            }
-            packages += ' libc++-dev';
-            if (linux_distro === 'Debian 10') {
-              packages += ' libc++abi-dev';
-            }
+          packages += ' clang' + getClangVersionSuffix() + ' libc++-dev';
+          if (linux_distro === 'Debian 10' || linux_distro === 'Ubuntu 18' || linux_distro === 'Ubuntu 20') {
+            packages += ' libc++abi-dev';
           }
         } else {
           packages += ' g++';
@@ -648,7 +656,7 @@ function onOptionsChanged() {
     if (target === 'JNI') {
       packages += ' jdk';
     }
-    commands.push('pkg_add ' + packages);
+    commands.push('pkg_add -z ' + packages);
     if (!use_root) {
       commands.push('exit');
     }
@@ -675,7 +683,7 @@ function onOptionsChanged() {
     commands.push('cd vcpkg');
     commands.push(local + 'bootstrap-vcpkg.bat');
     if (target === 'C++/CX') {
-      commands.push(local + 'vcpkg.exe install openssl:arm-uwp openssl:x64-uwp openssl:x86-uwp zlib:arm-uwp zlib:x64-uwp zlib:x86-uwp');
+      commands.push(local + 'vcpkg.exe install openssl-uwp:arm-uwp openssl-uwp:x64-uwp openssl-uwp:x86-uwp zlib:arm-uwp zlib:x64-uwp zlib:x86-uwp');
     } else {
       if (build_64bit) {
         commands.push(local + 'vcpkg.exe install openssl:x64-windows zlib:x64-windows');
@@ -782,14 +790,13 @@ function onOptionsChanged() {
       var prefix = '';
       if (os_linux) {
         if (use_clang) {
-          if (linux_distro === 'Ubuntu 18') {
-            prefix = 'CC=/usr/bin/clang-6.0 CXX=/usr/bin/clang++-6.0 ';
-            options.push('-DCMAKE_AR=/usr/bin/llvm-ar-6.0');
-            options.push('-DCMAKE_NM=/usr/bin/llvm-nm-6.0');
-            options.push('-DCMAKE_OBJDUMP=/usr/bin/llvm-objdump-6.0');
-            options.push('-DCMAKE_RANLIB=/usr/bin/llvm-ranlib-6.0');
-          } else {
-            prefix = 'CC=/usr/bin/clang CXX=/usr/bin/clang++ ';
+          var clang_version_suffix = getClangVersionSuffix();
+          prefix = 'CC=/usr/bin/clang' + clang_version_suffix + ' CXX=/usr/bin/clang++' + clang_version_suffix + ' ';
+          if (use_lto) {
+            options.push('-DCMAKE_AR=/usr/bin/llvm-ar' + clang_version_suffix);
+            options.push('-DCMAKE_NM=/usr/bin/llvm-nm' + clang_version_suffix);
+            options.push('-DCMAKE_OBJDUMP=/usr/bin/llvm-objdump' + clang_version_suffix);
+            options.push('-DCMAKE_RANLIB=/usr/bin/llvm-ranlib' + clang_version_suffix);
           }
         } else if (linux_distro === 'Ubuntu 14') {
           prefix = 'CC=/usr/bin/gcc-4.9 CXX=/usr/bin/g++-4.9 ';

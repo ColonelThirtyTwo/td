@@ -6,15 +6,11 @@
 //
 #pragma once
 
-#include "td/db/binlog/ConcurrentBinlog.h"
-#include "td/db/BinlogKeyValue.h"
-
-#include <memory>
+#include "td/utils/Slice.h"
+#include "td/utils/Status.h"
 
 namespace td {
 
-using BinlogPmcBase = BinlogKeyValue<ConcurrentBinlog>;
-using BinlogPmc = std::shared_ptr<BinlogPmcBase>;
-using BinlogPmcPtr = BinlogPmcBase *;
+Status change_user(CSlice username, CSlice groupname = CSlice());
 
 }  // namespace td

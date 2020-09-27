@@ -15,12 +15,15 @@ endif()
 message(STATUS "Found JNI: ${JNI_INCLUDE_DIRS} ${JNI_LIBRARIES}")
 
 if (NOT Java_FOUND)
-  find_package(Java 1.6 REQUIRED)
+  find_package(Java REQUIRED)
 endif()
 message(STATUS "Found Java: ${Java_JAVAC_EXECUTABLE} ${Java_JAVADOC_EXECUTABLE}")
 
 # Generating TdApi.java
 find_program(PHP_EXECUTABLE php)
+if ((CMAKE_SYSTEM_NAME MATCHES "FreeBSD") AND (CMAKE_SYSTEM_VERSION MATCHES "HBSD"))
+  set(PHP_EXECUTABLE "PHP_EXECUTABLE-NOTFOUND")
+endif()
 
 set(TD_API_JAVA_PACKAGE "org/drinkless/tdlib")
 set(TD_API_JAVA_PATH ${CMAKE_CURRENT_SOURCE_DIR})

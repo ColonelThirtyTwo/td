@@ -10,6 +10,7 @@
 #include "td/utils/format.h"
 #include "td/utils/logging.h"
 #include "td/utils/misc.h"
+#include "td/utils/port/detail/skip_eintr.h"
 #include "td/utils/port/PollFlags.h"
 #include "td/utils/port/SocketFd.h"
 #include "td/utils/VectorQueue.h"
@@ -20,6 +21,8 @@
 #endif
 
 #if TD_PORT_POSIX
+#include <cerrno>
+
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -61,7 +64,7 @@ class UdpSocketReceiveHelper {
     message.error = Status::OK();
 
     if ((message_header.dwFlags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
-      message.error = Status::Error(501, "message too long");
+      message.error = Status::Error(501, "Message too long");
       message.data = BufferSlice();
       return;
     }
@@ -167,7 +170,8 @@ class UdpSocketFdImpl : private Iocp::Callback {
   UdpMessage to_receive_;
   WSAMSG receive_message_;
   UdpSocketReceiveHelper receive_helper_;
-  enum : size_t { MAX_PACKET_SIZE = 2048, RESERVED_SIZE = MAX_PACKET_SIZE * 8 };
+  static constexpr size_t MAX_PACKET_SIZE = 2048;
+  static constexpr size_t RESERVED_SIZE = MAX_PACKET_SIZE * 8;
   BufferSlice receive_buffer_;
 
   UdpMessage to_send_;
@@ -422,7 +426,7 @@ class UdpSocketReceiveHelper {
     }
     if (message_header.msg_flags & MSG_TRUNC) {
       if (message.error) {
-        *message.error = Status::Error(501, "message too long");
+        *message.error = Status::Error(501, "Message too long");
       }
       message.data.truncate(0);
       return;
@@ -473,7 +477,7 @@ class UdpSocketFdImpl {
     return info_.native_fd();
   }
   Status get_pending_error() {
-    if (!get_poll_info().get_flags().has_pending_error()) {
+    if (!get_poll_info().get_flags_local().has_pending_error()) {
       return Status::OK();
     }
     TRY_STATUS(detail::get_socket_pending_error(get_native_fd()));
@@ -483,7 +487,7 @@ class UdpSocketFdImpl {
   Status receive_message(UdpSocketFd::InboundMessage &message, bool &is_received) {
     is_received = false;
     int flags = 0;
-    if (get_poll_info().get_flags().has_pending_error()) {
+    if (get_poll_info().get_flags_local().has_pending_error()) {
 #ifdef MSG_ERRQUEUE
       flags = MSG_ERRQUEUE;
 #else
@@ -675,7 +679,7 @@ class UdpSocketFdImpl {
 #endif
   Status receive_messages_slow(MutableSpan<UdpSocketFd::InboundMessage> messages, size_t &cnt) {
     cnt = 0;
-    while (cnt < messages.size() && get_poll_info().get_flags().can_read()) {
+    while (cnt < messages.size() && get_poll_info().get_flags_local().can_read()) {
       auto &message = messages[cnt];
       CHECK(!message.data.empty());
       bool is_received;
@@ -690,7 +694,7 @@ class UdpSocketFdImpl {
   Status receive_messages_fast(MutableSpan<UdpSocketFd::InboundMessage> messages, size_t &cnt) {
     int flags = 0;
     cnt = 0;
-    if (get_poll_info().get_flags().has_pending_error()) {
+    if (get_poll_info().get_flags_local().has_pending_error()) {
 #ifdef MSG_ERRQUEUE
       flags = MSG_ERRQUEUE;
 #else
@@ -810,11 +814,11 @@ static Result<uint32> maximize_buffer(int socket_fd, int optname, uint32 max) {
 }
 
 Result<uint32> UdpSocketFd::maximize_snd_buffer(uint32 max) {
-  return maximize_buffer(get_native_fd().fd(), SO_SNDBUF, max == 0 ? default_udp_max_snd_buffer_size : max);
+  return maximize_buffer(get_native_fd().fd(), SO_SNDBUF, max == 0 ? DEFAULT_UDP_MAX_SND_BUFFER_SIZE : max);
 }
 
 Result<uint32> UdpSocketFd::maximize_rcv_buffer(uint32 max) {
-  return maximize_buffer(get_native_fd().fd(), SO_RCVBUF, max == 0 ? default_udp_max_rcv_buffer_size : max);
+  return maximize_buffer(get_native_fd().fd(), SO_RCVBUF, max == 0 ? DEFAULT_UDP_MAX_RCV_BUFFER_SIZE : max);
 }
 #else
 Result<uint32> UdpSocketFd::maximize_snd_buffer(uint32 max) {

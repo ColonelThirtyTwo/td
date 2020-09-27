@@ -14,6 +14,8 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <limits>
+#include <mutex>
 
 #if TD_ANDROID
 #include <android/log.h>
@@ -45,27 +47,43 @@ TD_THREAD_LOCAL const char *Logger::tag2_ = nullptr;
 Logger::Logger(LogInterface &log, const LogOptions &options, int log_level, Slice file_name, int line_num,
                Slice comment)
     : Logger(log, options, log_level) {
+  if (log_level == VERBOSITY_NAME(PLAIN) && &options == &log_options) {
+    return;
+  }
   if (!options_.add_info) {
     return;
   }
 
   // log level
   sb_ << '[';
-  if (log_level < 10) {
-    sb_ << ' ';
+  if (static_cast<unsigned int>(log_level) < 10) {
+    sb_ << ' ' << static_cast<char>('0' + log_level);
+  } else {
+    sb_ << log_level;
   }
-  sb_ << log_level << ']';
+  sb_ << ']';
 
   // thread id
   auto thread_id = get_thread_id();
   sb_ << "[t";
-  if (thread_id < 10) {
-    sb_ << ' ';
+  if (static_cast<unsigned int>(thread_id) < 10) {
+    sb_ << ' ' << static_cast<char>('0' + thread_id);
+  } else {
+    sb_ << thread_id;
   }
-  sb_ << thread_id << ']';
+  sb_ << ']';
 
   // timestamp
-  sb_ << '[' << StringBuilder::FixedDouble(Clocks::system(), 9) << ']';
+  auto time = Clocks::system();
+  auto unix_time = static_cast<uint32>(time);
+  auto nanoseconds = static_cast<uint32>((time - unix_time) * 1e9);
+  sb_ << '[' << unix_time << '.';
+  uint32 limit = 100000000;
+  while (nanoseconds < limit && limit > 1) {
+    sb_ << '0';
+    limit /= 10;
+  }
+  sb_ << nanoseconds << ']';
 
   // file : line
   if (!file_name.empty()) {
@@ -74,7 +92,7 @@ Logger::Logger(LogInterface &log, const LogOptions &options, int log_level, Slic
       last_slash_--;
     }
     file_name = file_name.substr(last_slash_ + 1);
-    sb_ << "[" << file_name << ':' << line_num << ']';
+    sb_ << '[' << file_name << ':' << static_cast<unsigned int>(line_num) << ']';
   }
 
   // context from tag_
@@ -258,6 +276,28 @@ void process_fatal_error(CSlice message) {
     callback(message);
   }
   std::abort();
+}
+
+namespace {
+std::mutex sdl_mutex;
+int sdl_cnt = 0;
+int sdl_verbosity = 0;
+}  // namespace
+
+ScopedDisableLog::ScopedDisableLog() {
+  std::unique_lock<std::mutex> guard(sdl_mutex);
+  if (sdl_cnt == 0) {
+    sdl_verbosity = set_verbosity_level(std::numeric_limits<int>::min());
+  }
+  sdl_cnt++;
+}
+
+ScopedDisableLog::~ScopedDisableLog() {
+  std::unique_lock<std::mutex> guard(sdl_mutex);
+  sdl_cnt--;
+  if (sdl_cnt == 0) {
+    set_verbosity_level(sdl_verbosity);
+  }
 }
 
 }  // namespace td

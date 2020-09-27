@@ -34,6 +34,7 @@ static std::mutex logging_mutex;
 static FileLog file_log;
 static TsLog ts_log(&file_log);
 static NullLog null_log;
+static CallbackLog callback_log;
 
 #define ADD_TAG(tag) \
   { #tag, &VERBOSITY_NAME(tag) }
@@ -47,7 +48,7 @@ static const std::map<Slice, int *> log_tags{
 
 Status Logging::set_current_stream(td_api::object_ptr<td_api::LogStream> stream) {
   if (stream == nullptr) {
-    return Status::Error("Log stream must not be empty");
+    return Status::Error("Log stream must be non-empty");
   }
 
   std::lock_guard<std::mutex> lock(logging_mutex);
@@ -59,7 +60,7 @@ Status Logging::set_current_stream(td_api::object_ptr<td_api::LogStream> stream)
       auto file_stream = td_api::move_object_as<td_api::logStreamFile>(stream);
       auto max_log_file_size = file_stream->max_file_size_;
       if (max_log_file_size <= 0) {
-        return Status::Error("Max log file size should be positive");
+        return Status::Error("Max log file size must be positive");
       }
 
       TRY_STATUS(file_log.init(file_stream->path_, max_log_file_size));
@@ -69,6 +70,9 @@ Status Logging::set_current_stream(td_api::object_ptr<td_api::LogStream> stream)
     }
     case td_api::logStreamEmpty::ID:
       log_interface = &null_log;
+      return Status::OK();
+    case td_api::logStreamCallback::ID:
+      log_interface = &callback_log;
       return Status::OK();
     default:
       UNREACHABLE();
@@ -133,6 +137,10 @@ Result<int> Logging::get_tag_verbosity_level(Slice tag) {
 void Logging::add_message(int log_verbosity_level, Slice message) {
   int VERBOSITY_NAME(client) = clamp(log_verbosity_level, 0, VERBOSITY_NAME(NEVER));
   VLOG(client) << message;
+}
+
+void Logging::set_log_message_callback(LogMessageCallbackPtr callback) {
+  callback_log.callback = callback;
 }
 
 }  // namespace td

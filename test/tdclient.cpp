@@ -6,14 +6,13 @@
 //
 #include "data.h"
 
-#include "td/actor/actor.h"
-#include "td/actor/PromiseFuture.h"
-
 #include "td/telegram/Client.h"
 #include "td/telegram/ClientActor.h"
 #include "td/telegram/files/PartsManager.h"
-
 #include "td/telegram/td_api.h"
+
+#include "td/actor/actor.h"
+#include "td/actor/PromiseFuture.h"
 
 #include "td/utils/base64.h"
 #include "td/utils/BufferedFd.h"
@@ -30,10 +29,12 @@
 #include "td/utils/Status.h"
 #include "td/utils/tests.h"
 
+#include <atomic>
 #include <cstdio>
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <utility>
 
 REGISTER_TESTS(tdclient);
@@ -231,7 +232,6 @@ class DoAuthentication : public Task {
         parameters->api_hash_ = "a3406de8d171bb422bb6ddf3bbd800e2";
         parameters->system_language_code_ = "en";
         parameters->device_model_ = "Desktop";
-        parameters->system_version_ = "Unknown";
         parameters->application_version_ = "tdclient-test";
         parameters->ignore_file_names_ = false;
         parameters->enable_storage_optimizer_ = true;
@@ -491,14 +491,14 @@ class TestFileGenerated : public Task {
                              make_tl_object<td_api::inputFileGenerated>(file_path, "square", 0),
                              make_tl_object<td_api::inputThumbnail>(
                                  make_tl_object<td_api::inputFileGenerated>(file_path, "thumbnail", 0), 0, 0),
-                             make_tl_object<td_api::formattedText>(tag_, Auto()))),
+                             true, make_tl_object<td_api::formattedText>(tag_, Auto()))),
                      [](auto res) { check_td_error(res); });
 
     this->send_query(
         make_tl_object<td_api::sendMessage>(chat_id_, 0, nullptr, nullptr,
                                             make_tl_object<td_api::inputMessageDocument>(
                                                 make_tl_object<td_api::inputFileGenerated>(file_path, "square", 0),
-                                                nullptr, make_tl_object<td_api::formattedText>(tag_, Auto()))),
+                                                nullptr, true, make_tl_object<td_api::formattedText>(tag_, Auto()))),
         [](auto res) { check_td_error(res); });
   }
 
@@ -840,7 +840,7 @@ class Tdclient_login : public Test {
 
 TEST(Client, Simple) {
   td::Client client;
-  //client.execute({1, td::td_api::make_object<td::td_api::setLogTagVerbosityLevel>("actor", 1)});
+  // client.execute({1, td::td_api::make_object<td::td_api::setLogTagVerbosityLevel>("actor", 1)});
   client.send({3, td::make_tl_object<td::td_api::testSquareInt>(3)});
   while (true) {
     auto result = client.receive(10);
@@ -858,14 +858,18 @@ TEST(Client, SimpleMulti) {
   //client.execute({1, td::td_api::make_object<td::td_api::setLogTagVerbosityLevel>("td_requests", 1)});
   //}
 
-  for (auto &client : clients) {
-    client.send({3, td::make_tl_object<td::td_api::testSquareInt>(3)});
+  for (size_t i = 0; i < clients.size(); i++) {
+    clients[i].send({i + 2, td::make_tl_object<td::td_api::testSquareInt>(3)});
+    if (Random::fast(0, 1) == 1) {
+      clients[i].send({1, td::make_tl_object<td::td_api::close>()});
+    }
   }
 
-  for (auto &client : clients) {
+  for (size_t i = 0; i < clients.size(); i++) {
     while (true) {
-      auto result = client.receive(10);
-      if (result.id == 3) {
+      auto result = clients[i].receive(10);
+      if (result.id == i + 2) {
+        CHECK(result.object->get_id() == td::td_api::testInt::ID);
         auto test_int = td::td_api::move_object_as<td::td_api::testInt>(result.object);
         ASSERT_EQ(test_int->value_, 9);
         break;
@@ -876,15 +880,30 @@ TEST(Client, SimpleMulti) {
 
 #if !TD_THREAD_UNSUPPORTED
 TEST(Client, Multi) {
-  std::vector<td::thread> threads;
+  td::vector<td::thread> threads;
+  std::atomic<int> ok_count{0};
   for (int i = 0; i < 4; i++) {
-    threads.emplace_back([] {
-      for (int i = 0; i < 1000; i++) {
+    threads.emplace_back([i, &ok_count] {
+      for (int j = 0; j < 1000; j++) {
         td::Client client;
-        client.send({3, td::make_tl_object<td::td_api::testSquareInt>(3)});
+        auto request_id = static_cast<td::uint64>(j + 2 + 1000 * i);
+        client.send({request_id, td::make_tl_object<td::td_api::testSquareInt>(3)});
+        if (j & 1) {
+          client.send({1, td::make_tl_object<td::td_api::close>()});
+        }
         while (true) {
           auto result = client.receive(10);
-          if (result.id == 3) {
+          if (result.id == request_id) {
+            ok_count++;
+            if ((j & 1) == 0) {
+              client.send({1, td::make_tl_object<td::td_api::close>()});
+            }
+          }
+          if (result.id == 0 && result.object != nullptr &&
+              result.object->get_id() == td::td_api::updateAuthorizationState::ID &&
+              static_cast<const td::td_api::updateAuthorizationState *>(result.object.get())
+                      ->authorization_state_->get_id() == td::td_api::authorizationStateClosed::ID) {
+            ok_count++;
             break;
           }
         }
@@ -894,6 +913,33 @@ TEST(Client, Multi) {
 
   for (auto &thread : threads) {
     thread.join();
+  }
+  ASSERT_EQ(8 * 1000, ok_count.load());
+}
+
+TEST(Client, MultiNew) {
+  td::vector<td::thread> threads;
+  td::MultiClient client;
+  int threads_n = 4;
+  int clients_n = 1000;
+  for (int i = 0; i < threads_n; i++) {
+    threads.emplace_back([&] {
+      for (int i = 0; i < clients_n; i++) {
+        auto id = client.create_client();
+        client.send(id, 3, td::make_tl_object<td::td_api::testSquareInt>(3));
+      }
+    });
+  }
+  for (auto &thread : threads) {
+    thread.join();
+  }
+
+  std::set<int32> ids;
+  while (ids.size() != static_cast<size_t>(threads_n) * clients_n) {
+    auto event = client.receive(10);
+    if (event.client_id != 0 && event.id == 3) {
+      ids.insert(event.client_id);
+    }
   }
 }
 #endif

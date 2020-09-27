@@ -10,7 +10,6 @@
 #include "td/telegram/Global.h"
 #include "td/telegram/logevent/LogEvent.h"
 #include "td/telegram/misc.h"
-#include "td/telegram/net/DcId.h"
 #include "td/telegram/net/NetQueryDispatcher.h"
 #include "td/telegram/Td.h"
 
@@ -383,9 +382,8 @@ void LanguagePackManager::send_language_get_difference_query(Language *language,
                      std::move(language_code), result->version_, true, vector<string>(), std::move(result->strings_),
                      Promise<td_api::object_ptr<td_api::languagePackStrings>>());
       });
-  send_with_promise(G()->net_query_creator().create(
-                        create_storer(telegram_api::langpack_getDifference(language_pack_, language_code, version)),
-                        DcId::main(), NetQuery::Type::Common, NetQuery::AuthFlag::Off),
+  send_with_promise(G()->net_query_creator().create_unauth(
+                        telegram_api::langpack_getDifference(language_pack_, language_code, version)),
                     std::move(request_promise));
 }
 
@@ -405,13 +403,19 @@ void LanguagePackManager::on_update_language_pack(tl_object_ptr<telegram_api::la
             << " from version " << difference->from_version_ << " with version " << difference->version_ << " of size "
             << difference->strings_.size();
   to_lower_inplace(difference->lang_code_);
+  if (language_code_.empty()) {
+    LOG(INFO) << "Ignore difference for language pack " << difference->lang_code_
+              << ", because have no used language pack";
+    return;
+  }
   if (language_pack_.empty()) {
     LOG(WARNING) << "Ignore difference for language pack " << difference->lang_code_
-                 << ", because used language pack was unset";
+                 << ", because localization target is not set";
     return;
   }
   if (difference->lang_code_ != language_code_ && difference->lang_code_ != base_language_code_) {
-    LOG(WARNING) << "Ignore difference for language pack " << difference->lang_code_;
+    LOG(WARNING) << "Ignore difference for language pack " << difference->lang_code_ << ", because using language pack "
+                 << language_code_ << " based on " << base_language_code_;
     return;
   }
   if (is_custom_language_code(difference->lang_code_) || difference->lang_code_.empty()) {
@@ -798,8 +802,7 @@ void LanguagePackManager::get_languages(bool only_local,
     send_closure(actor_id, &LanguagePackManager::on_get_languages, r_result.move_as_ok(), std::move(language_pack),
                  false, std::move(promise));
   });
-  send_with_promise(G()->net_query_creator().create(create_storer(telegram_api::langpack_getLanguages(language_pack_)),
-                                                    DcId::main(), NetQuery::Type::Common, NetQuery::AuthFlag::Off),
+  send_with_promise(G()->net_query_creator().create_unauth(telegram_api::langpack_getLanguages(language_pack_)),
                     std::move(request_promise));
 }
 
@@ -821,8 +824,7 @@ void LanguagePackManager::search_language_info(string language_code,
                      std::move(language_code), std::move(promise));
       });
   send_with_promise(
-      G()->net_query_creator().create(create_storer(telegram_api::langpack_getLanguage(language_pack_, language_code)),
-                                      DcId::main(), NetQuery::Type::Common, NetQuery::AuthFlag::Off),
+      G()->net_query_creator().create_unauth(telegram_api::langpack_getLanguage(language_pack_, language_code)),
       std::move(request_promise));
 }
 
@@ -1082,10 +1084,9 @@ void LanguagePackManager::get_language_pack_strings(string language_code, vector
                        std::move(language_code), result->version_, false, vector<string>(), std::move(result->strings_),
                        std::move(promise));
         });
-    send_with_promise(G()->net_query_creator().create(
-                          create_storer(telegram_api::langpack_getLangPack(language_pack_, language_code)),
-                          DcId::main(), NetQuery::Type::Common, NetQuery::AuthFlag::Off),
-                      std::move(request_promise));
+    send_with_promise(
+        G()->net_query_creator().create_unauth(telegram_api::langpack_getLangPack(language_pack_, language_code)),
+        std::move(request_promise));
   } else {
     auto request_promise =
         PromiseCreator::lambda([actor_id = actor_id(this), language_pack = language_pack_, language_code, keys,
@@ -1098,9 +1099,8 @@ void LanguagePackManager::get_language_pack_strings(string language_code, vector
           send_closure(actor_id, &LanguagePackManager::on_get_language_pack_strings, std::move(language_pack),
                        std::move(language_code), -1, false, std::move(keys), r_result.move_as_ok(), std::move(promise));
         });
-    send_with_promise(G()->net_query_creator().create(create_storer(telegram_api::langpack_getStrings(
-                                                          language_pack_, language_code, std::move(keys))),
-                                                      DcId::main(), NetQuery::Type::Common, NetQuery::AuthFlag::Off),
+    send_with_promise(G()->net_query_creator().create_unauth(
+                          telegram_api::langpack_getStrings(language_pack_, language_code, std::move(keys))),
                       std::move(request_promise));
   }
 }
@@ -1585,7 +1585,7 @@ Result<LanguagePackManager::LanguageInfo> LanguagePackManager::get_language_info
 Result<LanguagePackManager::LanguageInfo> LanguagePackManager::get_language_info(
     td_api::languagePackInfo *language_pack_info) {
   if (language_pack_info == nullptr) {
-    return Status::Error(400, "Language pack info must not be empty");
+    return Status::Error(400, "Language pack info must be non-empty");
   }
 
   if (!clean_input_string(language_pack_info->id_)) {

@@ -12,6 +12,7 @@
 #include "td/telegram/FullMessageId.h"
 #include "td/telegram/logevent/LogEvent.h"
 #include "td/telegram/MessageContentType.h"
+#include "td/telegram/MessageCopyOptions.h"
 #include "td/telegram/MessageEntity.h"
 #include "td/telegram/MessageId.h"
 #include "td/telegram/Photo.h"
@@ -135,6 +136,8 @@ bool get_message_content_poll_is_closed(const Td *td, const MessageContent *cont
 
 bool get_message_content_poll_is_anonymous(const Td *td, const MessageContent *content);
 
+bool has_message_content_web_page(const MessageContent *content);
+
 void remove_message_content_web_page(MessageContent *content);
 
 void set_message_content_poll_answer(Td *td, const MessageContent *content, FullMessageId full_message_id,
@@ -153,12 +156,13 @@ void merge_message_contents(Td *td, const MessageContent *old_content, MessageCo
 
 bool merge_message_content_file_id(Td *td, MessageContent *message_content, FileId new_file_id);
 
-void register_message_content(Td *td, const MessageContent *content, FullMessageId full_message_id);
+void register_message_content(Td *td, const MessageContent *content, FullMessageId full_message_id, const char *source);
 
 void reregister_message_content(Td *td, const MessageContent *old_content, const MessageContent *new_content,
-                                FullMessageId full_message_id);
+                                FullMessageId full_message_id, const char *source);
 
-void unregister_message_content(Td *td, const MessageContent *content, FullMessageId full_message_id);
+void unregister_message_content(Td *td, const MessageContent *content, FullMessageId full_message_id,
+                                const char *source);
 
 unique_ptr<MessageContent> get_secret_message_content(
     Td *td, string message_text, tl_object_ptr<telegram_api::encryptedFile> file,
@@ -171,10 +175,10 @@ unique_ptr<MessageContent> get_message_content(Td *td, FormattedText message_tex
                                                DialogId owner_dialog_id, bool is_content_read, UserId via_bot_user_id,
                                                int32 *ttl);
 
-enum class MessageContentDupType : int32 { Send, SendViaBot, Forward, Copy, CopyWithoutCaption };
+enum class MessageContentDupType : int32 { Send, SendViaBot, Forward, Copy };
 
 unique_ptr<MessageContent> dup_message_content(Td *td, DialogId dialog_id, const MessageContent *content,
-                                               MessageContentDupType type);
+                                               MessageContentDupType type, MessageCopyOptions &&copy_options);
 
 unique_ptr<MessageContent> get_action_message_content(Td *td, tl_object_ptr<telegram_api::MessageAction> &&action,
                                                       DialogId owner_dialog_id, MessageId reply_to_message_id);

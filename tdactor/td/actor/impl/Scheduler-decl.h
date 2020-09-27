@@ -159,7 +159,6 @@ class Scheduler {
   };
   friend class ServiceActor;
 
-  void do_custom_event(ActorInfo *actor, CustomEvent &event);
   void do_event(ActorInfo *actor, Event &&event);
 
   void enter_actor(ActorInfo *actor_info);
@@ -219,7 +218,7 @@ class Scheduler {
   bool has_guard_ = false;
   bool close_flag_ = false;
 
-  uint32 wait_generation_ = 0;
+  uint32 wait_generation_ = 1;
   int32 sched_id_ = 0;
   int32 sched_n_ = 0;
   std::shared_ptr<MpscPollableQueue<EventFull>> inbound_queue_;

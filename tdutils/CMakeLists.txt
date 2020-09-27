@@ -1,15 +1,9 @@
 cmake_minimum_required(VERSION 3.0.2 FATAL_ERROR)
 
+option(TDUTILS_MIME_TYPE "Generate mime types conversion; requires gperf" ON)
+
 if (NOT DEFINED CMAKE_INSTALL_LIBDIR)
   set(CMAKE_INSTALL_LIBDIR "lib")
-endif()
-
-if (WIN32)
-  if (WINGETOPT_FOUND)
-    set(TD_HAVE_GETOPT 1)
-  endif()
-else()
-  set(TD_HAVE_GETOPT 1)
 endif()
 
 if (NOT ZLIB_FOUND)
@@ -58,6 +52,7 @@ set(TDUTILS_SOURCE
   td/utils/port/MemoryMapping.cpp
   td/utils/port/path.cpp
   td/utils/port/PollFlags.cpp
+  td/utils/port/rlimit.cpp
   td/utils/port/ServerSocketFd.cpp
   td/utils/port/signals.cpp
   td/utils/port/sleep.cpp
@@ -67,6 +62,8 @@ set(TDUTILS_SOURCE
   td/utils/port/StdStreams.cpp
   td/utils/port/thread_local.cpp
   td/utils/port/UdpSocketFd.cpp
+  td/utils/port/uname.cpp
+  td/utils/port/user.cpp
   td/utils/port/wstring_convert.cpp
 
   td/utils/port/detail/Epoll.cpp
@@ -100,9 +97,8 @@ set(TDUTILS_SOURCE
   td/utils/JsonBuilder.cpp
   td/utils/logging.cpp
   td/utils/misc.cpp
-  td/utils/MimeType.cpp
   td/utils/MpmcQueue.cpp
-  td/utils/OptionsParser.cpp
+  td/utils/OptionParser.cpp
   td/utils/PathView.cpp
   td/utils/Random.cpp
   td/utils/SharedSlice.cpp
@@ -113,6 +109,7 @@ set(TDUTILS_SOURCE
   td/utils/tests.cpp
   td/utils/Time.cpp
   td/utils/Timer.cpp
+  td/utils/TsFileLog.cpp
   td/utils/tl_parsers.cpp
   td/utils/translit.cpp
   td/utils/TsFileLog.cpp
@@ -133,6 +130,7 @@ set(TDUTILS_SOURCE
   td/utils/port/Poll.h
   td/utils/port/PollBase.h
   td/utils/port/PollFlags.h
+  td/utils/port/rlimit.h
   td/utils/port/RwMutex.h
   td/utils/port/ServerSocketFd.h
   td/utils/port/signals.h
@@ -144,6 +142,8 @@ set(TDUTILS_SOURCE
   td/utils/port/thread.h
   td/utils/port/thread_local.h
   td/utils/port/UdpSocketFd.h
+  td/utils/port/uname.h
+  td/utils/port/user.h
   td/utils/port/wstring_convert.h
 
   td/utils/port/detail/Epoll.h
@@ -156,6 +156,7 @@ set(TDUTILS_SOURCE
   td/utils/port/detail/Poll.h
   td/utils/port/detail/PollableFd.h
   td/utils/port/detail/Select.h
+  td/utils/port/detail/skip_eintr.h
   td/utils/port/detail/ThreadIdGuard.h
   td/utils/port/detail/ThreadPthread.h
   td/utils/port/detail/ThreadStl.h
@@ -163,6 +164,7 @@ set(TDUTILS_SOURCE
 
   td/utils/AesCtrByteFlow.h
   td/utils/as.h
+  td/utils/AtomicRead.h
   td/utils/base64.h
   td/utils/benchmark.h
   td/utils/BigNum.h
@@ -206,7 +208,6 @@ set(TDUTILS_SOURCE
   td/utils/List.h
   td/utils/logging.h
   td/utils/MemoryLog.h
-  td/utils/MimeType.h
   td/utils/misc.h
   td/utils/MovableValue.h
   td/utils/MpmcQueue.h
@@ -217,7 +218,7 @@ set(TDUTILS_SOURCE
   td/utils/ObjectPool.h
   td/utils/Observer.h
   td/utils/optional.h
-  td/utils/OptionsParser.h
+  td/utils/OptionParser.h
   td/utils/OrderedEventsProcessor.h
   td/utils/overloaded.h
   td/utils/Parser.h
@@ -233,6 +234,7 @@ set(TDUTILS_SOURCE
   td/utils/SpinLock.h
   td/utils/StackAllocator.h
   td/utils/Status.h
+  td/utils/StealingQueue.h
   td/utils/Storer.h
   td/utils/StorerBase.h
   td/utils/StringBuilder.h
@@ -242,11 +244,13 @@ set(TDUTILS_SOURCE
   td/utils/Time.h
   td/utils/TimedStat.h
   td/utils/Timer.h
+  td/utils/TsFileLog.h
   td/utils/tl_helpers.h
   td/utils/tl_parsers.h
   td/utils/tl_storers.h
   td/utils/translit.h
   td/utils/TsFileLog.h
+  td/utils/TsList.h
   td/utils/type_traits.h
   td/utils/UInt.h
   td/utils/uint128.h
@@ -256,6 +260,14 @@ set(TDUTILS_SOURCE
   td/utils/Variant.h
   td/utils/VectorQueue.h
 )
+
+if (TDUTILS_MIME_TYPE)
+  set(TDUTILS_SOURCE
+    ${TDUTILS_SOURCE}
+    td/utils/MimeType.cpp
+    td/utils/MimeType.h
+  )
+endif()
 
 set(TDUTILS_TEST_SOURCE
   ${CMAKE_CURRENT_SOURCE_DIR}/test/buffer.cpp
@@ -268,16 +280,19 @@ set(TDUTILS_TEST_SOURCE
   ${CMAKE_CURRENT_SOURCE_DIR}/test/HazardPointers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/heap.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/json.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/List.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/log.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/misc.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/MpmcQueue.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/MpmcWaiter.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/MpscLinkQueue.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/OptionParser.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/OrderedEventsProcessor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/port.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/pq.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/SharedObjectPool.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/SharedSlice.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/StealingQueue.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/variant.cpp
   PARENT_SCOPE
 )
@@ -285,13 +300,8 @@ set(TDUTILS_TEST_SOURCE
 #RULES
 #LIBRARIES
 add_library(tdutils STATIC ${TDUTILS_SOURCE})
-if (WIN32)
-  # find_library(WS2_32_LIBRARY ws2_32)
-  # find_library(MSWSOCK_LIBRARY Mswsock)
-  # target_link_libraries(tdutils PRIVATE ${WS2_32_LIBRARY} ${MSWSOCK_LIBRARY})
-  target_link_libraries(tdutils PRIVATE ws2_32 Mswsock Normaliz)
-endif()
-if (NOT CMAKE_CROSSCOMPILING)
+
+if (NOT CMAKE_CROSSCOMPILING AND TDUTILS_MIME_TYPE)
   add_dependencies(tdutils tdmime_auto)
 endif()
 
@@ -314,11 +324,19 @@ if (CRC32C_FOUND)
   target_link_libraries(tdutils PRIVATE crc32c)
 endif()
 if (ABSL_FOUND)
-  target_link_libraries(tdutils PUBLIC absl::flat_hash_map absl::flat_hash_set absl::hash)
+  target_link_libraries(tdutils SYSTEM PUBLIC absl::flat_hash_map absl::flat_hash_set absl::hash)
 endif()
 
-if (WIN32 AND WINGETOPT_FOUND)
-  target_link_libraries(tdutils PRIVATE wingetopt)
+if (WIN32)
+  # find_library for system libraries doesn't work for UWP builds
+  # find_library(WS2_32_LIBRARY ws2_32)
+  # find_library(MSWSOCK_LIBRARY Mswsock)
+  # target_link_libraries(tdutils PRIVATE ${WS2_32_LIBRARY} ${MSWSOCK_LIBRARY})
+  if (MINGW)
+    target_link_libraries(tdutils PRIVATE ws2_32 mswsock normaliz psapi)
+  else()
+    target_link_libraries(tdutils PRIVATE ws2_32 Mswsock Normaliz psapi)
+  endif()
 endif()
 
 if (ANDROID)

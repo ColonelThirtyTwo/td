@@ -15,7 +15,6 @@
 #include <numeric>
 
 namespace td {
-/*** PartsManager ***/
 
 namespace {
 int64 calc_part_count(int64 size, int64 part_size) {
@@ -30,22 +29,27 @@ Status PartsManager::init_known_prefix(int64 known_prefix, size_t part_size, con
   return init_no_size(part_size, ready_parts);
 }
 
-void PartsManager::set_streaming_offset(int64 offset) {
-  SCOPE_EXIT {
-    set_streaming_limit(streaming_limit_);
+int32 PartsManager::set_streaming_offset(int64 offset, int64 limit) {
+  auto finish = [&] {
+    set_streaming_limit(limit);
+    update_first_not_ready_part();
+    return first_streaming_not_ready_part_;
   };
+
   if (offset < 0 || need_check_ || (!unknown_size_flag_ && get_size() < offset)) {
     streaming_offset_ = 0;
     LOG_IF(ERROR, offset != 0) << "Ignore streaming_offset " << offset << ", need_check_ = " << need_check_
                                << ", unknown_size_flag_ = " << unknown_size_flag_ << ", size = " << get_size();
-    return;
+
+    return finish();
   }
 
   auto part_i = offset / part_size_;
   if (use_part_count_limit_ && part_i >= MAX_PART_COUNT) {
     streaming_offset_ = 0;
     LOG(ERROR) << "Ignore streaming_offset " << offset << " in part " << part_i;
-    return;
+
+    return finish();
   }
 
   streaming_offset_ = offset;
@@ -55,6 +59,12 @@ void PartsManager::set_streaming_offset(int64 offset) {
     part_count_ = first_streaming_empty_part_;
     part_status_.resize(part_count_, PartStatus::Empty);
   }
+
+  return finish();
+}
+
+int32 PartsManager::get_pending_count() const {
+  return pending_count_;
 }
 
 void PartsManager::set_streaming_limit(int64 limit) {
@@ -120,7 +130,6 @@ Status PartsManager::init(int64 size, int64 expected_size, bool is_size_final, s
       return Status::Error("FILE_UPLOAD_RESTART");
     }
   } else {
-    // TODO choose part_size_ depending on size
     part_size_ = 64 * (1 << 10);
     while (use_part_count_limit && calc_part_count(expected_size_, part_size_) > MAX_PART_COUNT) {
       part_size_ *= 2;
@@ -217,6 +226,7 @@ string PartsManager::get_bitmask() {
 }
 
 bool PartsManager::is_part_in_streaming_limit(int part_i) const {
+  CHECK(part_i < part_count_);
   auto offset_begin = static_cast<int64>(part_i) * static_cast<int64>(get_part_size());
   auto offset_end = offset_begin + static_cast<int64>(get_part(part_i).size);
 
@@ -254,6 +264,9 @@ bool PartsManager::is_streaming_limit_reached() {
   // wrap
   if (!unknown_size_flag_ && part_i == part_count_) {
     part_i = first_not_ready_part_;
+  }
+  if (part_i == part_count_) {
+    return false;
   }
   return !is_part_in_streaming_limit(part_i);
 }
@@ -489,7 +502,7 @@ Status PartsManager::init_common(const std::vector<int> &ready_parts) {
 
 void PartsManager::set_need_check() {
   need_check_ = true;
-  set_streaming_offset(0);
+  set_streaming_offset(0, 0);
 }
 
 void PartsManager::set_checked_prefix_size(int64 size) {

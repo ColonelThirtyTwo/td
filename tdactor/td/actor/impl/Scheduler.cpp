@@ -22,6 +22,7 @@
 #include "td/utils/Time.h"
 
 #include <functional>
+#include <iterator>
 #include <utility>
 
 namespace td {
@@ -244,7 +245,7 @@ void Scheduler::clear() {
   if (callback_) {
     // can't move lambda with unique_ptr inside into std::function
     auto ptr = actor_info_pool_.release();
-    callback_->register_at_finish([=]() { delete ptr; });
+    callback_->register_at_finish([ptr] { delete ptr; });
   } else {
     actor_info_pool_.reset();
   }
@@ -253,54 +254,39 @@ void Scheduler::clear() {
 void Scheduler::do_event(ActorInfo *actor_info, Event &&event) {
   event_context_ptr_->link_token = event.link_token;
   auto actor = actor_info->get_actor_unsafe();
+  VLOG(actor) << *actor_info << ' ' << event;
   switch (event.type) {
-    case Event::Type::Start: {
-      VLOG(actor) << *actor_info << " Event::Start";
+    case Event::Type::Start:
       actor->start_up();
       break;
-    }
-    case Event::Type::Stop: {
-      VLOG(actor) << *actor_info << " Event::Stop";
+    case Event::Type::Stop:
       actor->tear_down();
       break;
-    }
-    case Event::Type::Yield: {
-      VLOG(actor) << *actor_info << " Event::Yield";
+    case Event::Type::Yield:
       actor->wakeup();
       break;
-    }
-    case Event::Type::Hangup: {
-      auto token = get_link_token(actor);
-      VLOG(actor) << *actor_info << " Event::Hangup " << tag("token", format::as_hex(token));
-      if (token != 0) {
+    case Event::Type::Hangup:
+      if (get_link_token(actor) != 0) {
         actor->hangup_shared();
       } else {
         actor->hangup();
       }
       break;
-    }
-    case Event::Type::Timeout: {
-      VLOG(actor) << *actor_info << " Event::Timeout";
+    case Event::Type::Timeout:
       actor->timeout_expired();
       break;
-    }
-    case Event::Type::Raw: {
-      VLOG(actor) << *actor_info << " Event::Raw";
+    case Event::Type::Raw:
       actor->raw_event(event.data);
       break;
-    }
-    case Event::Type::Custom: {
-      do_custom_event(actor_info, *event.data.custom_event);
+    case Event::Type::Custom:
+      event.data.custom_event->run(actor);
       break;
-    }
-    case Event::Type::NoType: {
-      UNREACHABLE();
-      break;
-    }
+    case Event::Type::NoType:
     default:
       UNREACHABLE();
+      break;
   }
-  // can't clear event here. It may be already destroyed during destory_actor
+  // can't clear event here. It may be already destroyed during destroy_actor
 }
 
 void Scheduler::register_migrated_actor(ActorInfo *actor_info) {
@@ -317,8 +303,8 @@ void Scheduler::register_migrated_actor(ActorInfo *actor_info) {
   }
   auto it = pending_events_.find(actor_info);
   if (it != pending_events_.end()) {
-    actor_info->mailbox_.insert(actor_info->mailbox_.end(), make_move_iterator(begin(it->second)),
-                                make_move_iterator(end(it->second)));
+    actor_info->mailbox_.insert(actor_info->mailbox_.end(), std::make_move_iterator(it->second.begin()),
+                                std::make_move_iterator(it->second.end()));
     pending_events_.erase(it);
   }
   if (actor_info->mailbox_.empty()) {

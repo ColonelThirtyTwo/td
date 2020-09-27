@@ -8,34 +8,37 @@
 
 namespace td {
 
-constexpr int32 MTPROTO_LAYER = 109;
+constexpr int32 MTPROTO_LAYER = 117;
 
 enum class Version : int32 {
-  Initial,
+  Initial,  // 0
   StoreFileId,
   AddKeyHashToSecretChat,
   AddDurationToAnimation,
   FixStoreGameWithoutAnimation,
-  AddAccessHashToSecretChat,
+  AddAccessHashToSecretChat,  // 5
   StoreFileOwnerId,
   StoreFileEncryptionKey,
   NetStatsCountDuration,
   FixWebPageInstantViewDatabase,
-  FixMinUsers,
+  FixMinUsers,  // 10
   FixPageBlockAudioEmptyFile,
   AddMessageInvoiceProviderData,
   AddCaptionEntities,
   AddVenueType,
-  AddTermsOfService,
+  AddTermsOfService,  // 15
   AddContactVcard,
   AddMessageUnsupportedVersion,
   SupportInstantView2_0,
   AddNotificationGroupInfoMaxRemovedMessageId,
-  SupportMinithumbnails,
+  SupportMinithumbnails,  // 20
   AddVideoCallsSupport,
   AddPhotoSizeSource,
   AddFolders,
   SupportPolls2_0,
+  AddDiceEmoji,  // 25
+  AddAnimationStickers,
+  AddDialogPhotoHasAnimation,
   Next
 };
 
@@ -49,6 +52,7 @@ enum class DbVersion : int32 {
   AddNotificationsSupport,
   AddFolders,
   AddScheduledMessages,
+  StorePinnedDialogsInBinlog,
   Next
 };
 

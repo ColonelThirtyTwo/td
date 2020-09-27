@@ -206,7 +206,7 @@ Changes in 1.5.0:
     instead of `can_send_media_messages`.
   - Allowed administrators in basic groups to use the method `generateChatInviteLink`.
 * Added out of the box `OpenBSD` and `NetBSD` operating systems support.
-* Added possibility to use `LibreSSL` instead of `OpenSSL` to build TDLib.
+* Added possibility to use `LibreSSL` >= 2.7.0 instead of `OpenSSL` to build TDLib.
 * Added instructions for building TDLib on `Debian 10`, `OpenBSD` and `NetBSD` to
   the [TDLib build instructions generator](https://tdlib.github.io/td/build.html).
 * Added support for Backgrounds 2.0:
@@ -716,7 +716,7 @@ Changes in 1.2.0:
 * Added method `searchInstalledStickerSets` to search by title and name for installed sticker sets.
 * Added methods for handling connected websites: `getConnectedWebsites`, `disconnectWebsite` and
   `disconnectAllWebsites`.
-* Added method `getCountryCode`, which uses current user IP to identify their country.
+* Added method `getCountryCode`, which uses current user IP address to identify their country.
 * Added option `t_me_url`.
 * Fixed `BlackBerry` spelling in `deviceTokenBlackBerryPush`.
 * Fixed return type of `getChatMessageByDate` method, which is `Message` and not `Messages`.

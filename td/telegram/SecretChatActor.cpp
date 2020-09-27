@@ -6,6 +6,7 @@
 //
 #include "td/telegram/SecretChatActor.h"
 
+#include "td/telegram/net/DcId.h"
 #include "td/telegram/net/NetQueryCreator.h"
 #include "td/telegram/SecretChatId.h"
 #include "td/telegram/ServerMessageId.h"
@@ -66,6 +67,12 @@ class SecretImpl {
 SecretChatActor::SecretChatActor(int32 id, unique_ptr<Context> context, bool can_be_empty)
     : context_(std::move(context)), can_be_empty_(can_be_empty) {
   auth_state_.id = id;
+}
+
+template <class T>
+NetQueryPtr SecretChatActor::create_net_query(QueryType type, const T &function) {
+  return context_->net_query_creator().create(UniqueId::next(UniqueId::Type::Default, static_cast<uint8>(type)),
+                                              function, DcId::main(), NetQuery::Type::Common, NetQuery::AuthFlag::On);
 }
 
 void SecretChatActor::update_chat(telegram_api::object_ptr<telegram_api::EncryptedChat> chat) {
@@ -146,7 +153,7 @@ void SecretChatActor::replay_create_chat(unique_ptr<logevent::CreateSecretChat> 
 void SecretChatActor::add_inbound_message(unique_ptr<logevent::InboundSecretMessage> message) {
   SCOPE_EXIT {
     if (message) {
-      message->qts_ack.set_value(Unit());
+      message->promise.set_value(Unit());
     }
   };
   if (close_flag_) {
@@ -320,7 +327,7 @@ void SecretChatActor::send_message_impl(tl_object_ptr<secret_api::DecryptedMessa
   LOG(INFO) << "Send message: " << to_string(*message) << to_string(file);
 
   auto it = random_id_to_outbound_message_state_token_.find(random_id);
-  if (it != end(random_id_to_outbound_message_state_token_)) {
+  if (it != random_id_to_outbound_message_state_token_.end()) {
     return on_outbound_outer_send_message_promise(it->second, std::move(promise));
   }
 
@@ -335,7 +342,7 @@ void SecretChatActor::send_message_impl(tl_object_ptr<secret_api::DecryptedMessa
   binlog_event->encrypted_message =
       create_encrypted_message(current_layer(), binlog_event->my_in_seq_no, binlog_event->my_out_seq_no, message)
           .move_as_ok();
-  binlog_event->is_service = (flags & SendFlag::Push) == 0;
+  binlog_event->need_notify_user = (flags & SendFlag::Push) == 0;
   binlog_event->is_external = (flags & SendFlag::External) != 0;
   if (message->get_id() == secret_api::decryptedMessageService::ID) {
     binlog_event->is_rewritable = false;
@@ -358,9 +365,8 @@ void SecretChatActor::send_message_action(tl_object_ptr<secret_api::SendMessageA
   }
   bool flag = action->get_id() != secret_api::sendMessageCancelAction::ID;
 
-  auto net_query = context_->net_query_creator().create(
-      UniqueId::next(UniqueId::Type::Default, static_cast<uint8>(QueryType::Ignore)),
-      create_storer(telegram_api::messages_setEncryptedTyping(get_input_chat(), flag)));
+  auto net_query =
+      create_net_query(QueryType::Ignore, telegram_api::messages_setEncryptedTyping(get_input_chat(), flag));
   if (!set_typing_query_.empty()) {
     LOG(INFO) << "Cancel previous set typing query";
     cancel_query(set_typing_query_);
@@ -390,9 +396,8 @@ void SecretChatActor::send_read_history(int32 date, Promise<> promise) {
     cancel_query(read_history_query_);
   }
 
-  auto net_query = context_->net_query_creator().create(
-      UniqueId::next(UniqueId::Type::Default, static_cast<uint8>(QueryType::ReadHistory)),
-      create_storer(telegram_api::messages_readEncryptedHistory(get_input_chat(), date)));
+  auto net_query =
+      create_net_query(QueryType::ReadHistory, telegram_api::messages_readEncryptedHistory(get_input_chat(), date));
   read_history_query_ = net_query.get_weak();
   last_read_history_date_ = date;
   read_history_promise_ = std::move(promise);
@@ -566,11 +571,9 @@ Status SecretChatActor::run_auth() {
         return Status::OK();
       }
       // messages.requestEncryption#f64daf43 user_id:InputUser random_id:int g_a:bytes = EncryptedChat;
-      telegram_api::messages_requestEncryption tl_query(get_input_user(), auth_state_.random_id,
-                                                        BufferSlice(auth_state_.handshake.get_g_b()));
-      auto query = context_->net_query_creator().create(
-          UniqueId::next(UniqueId::Type::Default, static_cast<uint8>(QueryType::EncryptedChat)),
-          create_storer(tl_query));
+      auto query = create_net_query(QueryType::EncryptedChat, telegram_api::messages_requestEncryption(
+                                                                  get_input_user(), auth_state_.random_id,
+                                                                  BufferSlice(auth_state_.handshake.get_g_b())));
       context_->send_net_query(std::move(query), actor_shared(this), false);
       auth_state_.state = State::WaitRequestResponse;
       return Status::OK();
@@ -584,11 +587,10 @@ Status SecretChatActor::run_auth() {
       pfs_state_.auth_key = mtproto::AuthKey(id_and_key.first, std::move(id_and_key.second));
       calc_key_hash();
       // messages.acceptEncryption#3dbc0415 peer:InputEncryptedChat g_b:bytes key_fingerprint:long = EncryptedChat;
-      telegram_api::messages_acceptEncryption tl_query(get_input_chat(), BufferSlice(auth_state_.handshake.get_g_b()),
-                                                       pfs_state_.auth_key.id());
-      auto query = context_->net_query_creator().create(
-          UniqueId::next(UniqueId::Type::Default, static_cast<uint8>(QueryType::EncryptedChat)),
-          create_storer(tl_query));
+      auto query = create_net_query(
+          QueryType::EncryptedChat,
+          telegram_api::messages_acceptEncryption(get_input_chat(), BufferSlice(auth_state_.handshake.get_g_b()),
+                                                  pfs_state_.auth_key.id()));
       context_->send_net_query(std::move(query), actor_shared(this), false);
       auth_state_.state = State::WaitAcceptResponse;
       return Status::OK();
@@ -756,10 +758,7 @@ void SecretChatActor::do_close_chat_impl(unique_ptr<logevent::CloseSecretChat> e
   context_->secret_chat_db()->erase_value(config_state_);
   context_->secret_chat_db()->erase_value(pfs_state_);
   context_->secret_chat_db()->erase_value(seq_no_state_);
-  telegram_api::messages_discardEncryption tl_query(auth_state_.id);
-  auto query = context_->net_query_creator().create(
-      UniqueId::next(UniqueId::Type::Default, static_cast<uint8>(QueryType::DiscardEncryption)),
-      create_storer(tl_query));
+  auto query = create_net_query(QueryType::DiscardEncryption, telegram_api::messages_discardEncryption(auth_state_.id));
 
   send_update_secret_chat();
 
@@ -878,7 +877,7 @@ Result<std::tuple<uint64, BufferSlice, int32>> SecretChatActor::decrypt(BufferSl
 Status SecretChatActor::do_inbound_message_encrypted(unique_ptr<logevent::InboundSecretMessage> message) {
   SCOPE_EXIT {
     if (message) {
-      message->qts_ack.set_value(Unit());
+      message->promise.set_value(Unit());
     }
   };
   TRY_RESULT(decrypted, decrypt(message->encrypted_message));
@@ -895,9 +894,8 @@ Status SecretChatActor::do_inbound_message_encrypted(unique_ptr<logevent::Inboun
     parser.fetch_end();
     if (!parser.get_error()) {
       auto layer = message_with_layer->layer_;
-      if (layer < DEFAULT_LAYER && false /*TODO: fix android app bug? */) {
-        LOG(ERROR) << "All or nothing, " << tag("layer", layer) << " is not supported, drop message "
-                   << to_string(message_with_layer);
+      if (layer < DEFAULT_LAYER && false /* Android app can send such messages */) {
+        LOG(ERROR) << "Layer " << layer << " is not supported, drop message " << to_string(message_with_layer);
         return Status::OK();
       }
       if (config_state_.his_layer < layer) {
@@ -917,11 +915,11 @@ Status SecretChatActor::do_inbound_message_encrypted(unique_ptr<logevent::Inboun
       status = Status::Error(PSLICE() << parser.get_error() << format::as_hex_dump<4>(data_buffer.as_slice()));
     }
   } else {
-    status = Status::Error(PSLICE() << "Unknown constructor " << tag("ID", format::as_hex(id)));
+    status = Status::Error(PSLICE() << "Unknown constructor " << format::as_hex(id));
   }
 
   // support for older layer
-  LOG(WARNING) << "Failed to Fetch update: " << status;
+  LOG(WARNING) << "Failed to fetch update: " << status;
   send_action(secret_api::make_object<secret_api::decryptedMessageActionNotifyLayer>(MY_LAYER), SendFlag::None,
               Promise<>());
 
@@ -971,13 +969,13 @@ Status SecretChatActor::check_seq_no(int in_seq_no, int out_seq_no, int32 his_la
 
 Status SecretChatActor::do_inbound_message_decrypted_unchecked(unique_ptr<logevent::InboundSecretMessage> message) {
   SCOPE_EXIT {
-    LOG_IF(FATAL, message && message->qts_ack) << "Lost qts_promise";
+    CHECK(message == nullptr || !message->promise);
   };
   auto in_seq_no = message->decrypted_message_layer->in_seq_no_;
   auto out_seq_no = message->decrypted_message_layer->out_seq_no_;
   auto status = check_seq_no(in_seq_no, out_seq_no, message->his_layer());
   if (status.is_error() && status.code() != 2 /* not gap found */) {
-    message->qts_ack.set_value(Unit());
+    message->promise.set_value(Unit());
     if (message->logevent_id()) {
       LOG(INFO) << "Erase binlog event: " << tag("logevent_id", message->logevent_id());
       binlog_erase(context_->binlog(), message->logevent_id());
@@ -1012,14 +1010,14 @@ Status SecretChatActor::do_inbound_message_decrypted_unchecked(unique_ptr<logeve
       uint32 start_seq_no = static_cast<uint32>(action_resend->start_seq_no_ / 2);
       uint32 finish_seq_no = static_cast<uint32>(action_resend->end_seq_no_ / 2);
       if (start_seq_no + MAX_RESEND_COUNT < finish_seq_no) {
-        message->qts_ack.set_value(Unit());
+        message->promise.set_value(Unit());
         return Status::Error(PSLICE() << "Won't resend more than " << MAX_RESEND_COUNT << " messages");
       }
       LOG(INFO) << "ActionResend: " << tag("start", start_seq_no) << tag("finish_seq_no", finish_seq_no);
       for (auto seq_no = start_seq_no; seq_no <= finish_seq_no; seq_no++) {
         auto it = out_seq_no_to_outbound_message_state_token_.find(seq_no);
         if (it == out_seq_no_to_outbound_message_state_token_.end()) {
-          message->qts_ack.set_value(Unit());
+          message->promise.set_value(Unit());
           return Status::Error(PSLICE() << "Can't resend query " << tag("seq_no", seq_no));
         }
         auto state_id = it->second;
@@ -1128,8 +1126,8 @@ void SecretChatActor::do_outbound_message_impl(unique_ptr<logevent::OutboundSecr
 }
 
 void SecretChatActor::on_his_in_seq_no_updated() {
-  auto it = begin(out_seq_no_to_outbound_message_state_token_);
-  while (it != end(out_seq_no_to_outbound_message_state_token_) && it->first < seq_no_state_.his_in_seq_no) {
+  auto it = out_seq_no_to_outbound_message_state_token_.begin();
+  while (it != out_seq_no_to_outbound_message_state_token_.end() && it->first < seq_no_state_.his_in_seq_no) {
     auto token = it->second;
     it = out_seq_no_to_outbound_message_state_token_.erase(it);
     on_outbound_ack(token);
@@ -1143,6 +1141,7 @@ void SecretChatActor::on_pfs_state_changed() {
   LOG(INFO) << "In on_pfs_state_changed: " << pfs_state_;
   pfs_state_changed_ = true;
 }
+
 Promise<> SecretChatActor::add_changes(Promise<> save_changes_finish) {
   StateChange change;
   if (seq_no_state_changed_) {
@@ -1200,7 +1199,7 @@ void SecretChatActor::do_inbound_message_decrypted_pending(unique_ptr<logevent::
   auto logevent_id = message->logevent_id();
 
   // qts
-  auto qts_promise = std::move(message->qts_ack);
+  auto qts_promise = std::move(message->promise);
 
   if (logevent_id == 0) {
     message->is_pending = true;
@@ -1278,7 +1277,7 @@ Status SecretChatActor::do_inbound_message_decrypted(unique_ptr<logevent::Inboun
   }
 
   // qts
-  auto qts_promise = std::move(message->qts_ack);
+  auto qts_promise = std::move(message->promise);
 
   // process message
   tl_object_ptr<telegram_api::encryptedFile> file;
@@ -1290,7 +1289,7 @@ Status SecretChatActor::do_inbound_message_decrypted(unique_ptr<logevent::Inboun
     auto old = move_tl_object_as<secret_api::decryptedMessage46>(message->decrypted_message_layer->message_);
     old->flags_ &= ~secret_api::decryptedMessage::GROUPED_ID_MASK;  // just in case
     message->decrypted_message_layer->message_ = secret_api::make_object<secret_api::decryptedMessage>(
-        old->flags_, old->random_id_, old->ttl_, std::move(old->message_), std::move(old->media_),
+        old->flags_, false /*ignored*/, old->random_id_, old->ttl_, std::move(old->message_), std::move(old->media_),
         std::move(old->entities_), std::move(old->via_bot_name_), old->reply_to_random_id_, 0);
   }
   if (message->decrypted_message_layer->message_->get_id() == secret_api::decryptedMessageService8::ID) {
@@ -1462,24 +1461,23 @@ void SecretChatActor::inbound_loop(InboundMessageState *state, uint64 state_id) 
 
 NetQueryPtr SecretChatActor::create_net_query(const logevent::OutboundSecretMessage &message) {
   NetQueryPtr query;
-  if (message.is_service) {
+  if (message.need_notify_user) {
     CHECK(message.file.empty());
-    query = context_->net_query_creator().create(
-        UniqueId::next(UniqueId::Type::Default, static_cast<uint8>(QueryType::Message)),
-        create_storer(telegram_api::messages_sendEncryptedService(get_input_chat(), message.random_id,
-                                                                  message.encrypted_message.clone())));
-    query->total_timeout_limit = 1000000000;  // inf. We will re-sent it immediately anyway.
+    query = create_net_query(QueryType::Message,
+                             telegram_api::messages_sendEncryptedService(get_input_chat(), message.random_id,
+                                                                         message.encrypted_message.clone()));
   } else if (message.file.empty()) {
-    query = context_->net_query_creator().create(
-        UniqueId::next(UniqueId::Type::Default, static_cast<uint8>(QueryType::Message)),
-        create_storer(telegram_api::messages_sendEncrypted(get_input_chat(), message.random_id,
-                                                           message.encrypted_message.clone())));
+    query = create_net_query(
+        QueryType::Message,
+        telegram_api::messages_sendEncrypted(get_input_chat(), message.random_id, message.encrypted_message.clone()));
   } else {
-    query = context_->net_query_creator().create(
-        UniqueId::next(UniqueId::Type::Default, static_cast<uint8>(QueryType::Message)),
-        create_storer(telegram_api::messages_sendEncryptedFile(get_input_chat(), message.random_id,
-                                                               message.encrypted_message.clone(),
-                                                               message.file.as_input_encrypted_file())));
+    query = create_net_query(
+        QueryType::Message,
+        telegram_api::messages_sendEncryptedFile(get_input_chat(), message.random_id, message.encrypted_message.clone(),
+                                                 message.file.as_input_encrypted_file()));
+  }
+  if (!message.is_rewritable) {
+    query->total_timeout_limit_ = 1000000000;  // inf. We will re-sent it immediately anyway
   }
   if (message.is_external && context_->get_config_option_boolean("use_quick_ack")) {
     query->quick_ack_promise_ =
@@ -1552,7 +1550,7 @@ Status SecretChatActor::outbound_rewrite_with_empty(uint64 state_id) {
   MutableSlice data = state->message->encrypted_message.as_slice();
   CHECK(is_aligned_pointer<4>(data.data()));
 
-  // Rewrite with delete itself.
+  // Rewrite with delete itself
   tl_object_ptr<secret_api::DecryptedMessage> message = secret_api::make_object<secret_api::decryptedMessageService>(
       state->message->random_id, secret_api::make_object<secret_api::decryptedMessageActionDeleteMessages>(
                                      std::vector<int64>{static_cast<int64>(state->message->random_id)}));
@@ -1563,7 +1561,7 @@ Status SecretChatActor::outbound_rewrite_with_empty(uint64 state_id) {
   LOG(INFO) << tag("crc", crc64(state->message->encrypted_message.as_slice()));
   state->message->is_rewritable = false;
   state->message->is_external = false;
-  state->message->is_service = true;
+  state->message->need_notify_user = false;
   state->message->file = logevent::EncryptedInputFile::from_input_encrypted_file(nullptr);
   binlog_rewrite(context_->binlog(), state->message->logevent_id(), LogEvent::HandlerType::SecretChats,
                  create_storer(*state->message));
@@ -1788,7 +1786,7 @@ void SecretChatActor::on_outbound_outer_send_message_promise(uint64 state_id, Pr
   promise.set_value(Unit());  // Seems like this message is at least stored to binlog already
   if (state->send_result_) {
     state->send_result_({});
-  } else {
+  } else if (state->message->is_sent) {
     context_->on_send_message_error(state->message->random_id, Status::Error(400, "Message has already been sent"),
                                     Auto());
   }
@@ -1838,6 +1836,10 @@ Status SecretChatActor::on_update_chat(telegram_api::encryptedChatRequested &upd
   auth_state_.date = context_->unix_time();
   TRY_STATUS(save_common_info(update));
   auth_state_.handshake.set_g_a(update.g_a_.as_slice());
+  if ((update.flags_ & telegram_api::encryptedChatRequested::FOLDER_ID_MASK) != 0) {
+    auth_state_.initial_folder_id = FolderId(update.folder_id_);
+  }
+
   send_update_secret_chat();
   return Status::OK();
 }
@@ -1964,11 +1966,8 @@ void SecretChatActor::get_dh_config() {
   }
 
   auto version = auth_state_.dh_config.version;
-  int random_length = 0;
-  telegram_api::messages_getDhConfig tl_query(version, random_length);
-
-  auto query = context_->net_query_creator().create(
-      UniqueId::next(UniqueId::Type::Default, static_cast<uint8>(QueryType::DhConfig)), create_storer(tl_query));
+  int32 random_length = 0;
+  auto query = create_net_query(QueryType::DhConfig, telegram_api::messages_getDhConfig(version, random_length));
   context_->send_net_query(std::move(query), actor_shared(this), false);
 }
 
@@ -2020,7 +2019,8 @@ void SecretChatActor::send_update_secret_chat() {
     state = SecretChatState::Waiting;
   }
   context_->on_update_secret_chat(auth_state_.access_hash, get_user_id(), state, auth_state_.x == 0, config_state_.ttl,
-                                  auth_state_.date, auth_state_.key_hash, current_layer());
+                                  auth_state_.date, auth_state_.key_hash, current_layer(),
+                                  auth_state_.initial_folder_id);
 }
 
 void SecretChatActor::on_outbound_action(secret_api::decryptedMessageActionSetMessageTTL &set_ttl) {
@@ -2144,7 +2144,10 @@ Status SecretChatActor::on_inbound_action(secret_api::decryptedMessageActionRequ
   if (pfs_state_.state != PfsState::Empty) {
     return Status::Error("Unexpected RequestKey");
   }
-  LOG_CHECK(pfs_state_.other_auth_key.empty()) << "TODO: got requestKey, before old key is dropped";
+  if (!pfs_state_.other_auth_key.empty()) {
+    LOG_CHECK(pfs_state_.can_forget_other_key) << "TODO: got requestKey, before old key is dropped";
+    return Status::Error("Unexpected RequestKey (old key is used)");
+  }
   pfs_state_.state = PfsState::SendAccept;
   pfs_state_.handshake = DhHandshake();
   pfs_state_.exchange_id = request_key.exchange_id_;
